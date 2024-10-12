@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(int Argc, char **Argv) {
   // 判断传入程序的参数是否为2个，Argv[0]为程序名称，Argv[1]为传入的第一个参数
@@ -13,6 +14,9 @@ int main(int Argc, char **Argv) {
     return 1;
   }
 
+
+  char *p = Argv[1];
+
   // 声明一个全局main段，同时也是程序入口段
   printf("  .globl main\n");
   // main段标签
@@ -20,7 +24,24 @@ int main(int Argc, char **Argv) {
   // li为addi别名指令，加载一个立即数到寄存器中
   // 传入程序的参数为str类型，因为需要转换为需要int类型，
   // atoi为“ASCII to integer”
-  printf("  li a0, %d\n", atoi(Argv[1]));
+  printf("  li a0, %d\n", (int)strtol(p, &p, 10));
+
+  while (*p) {
+    if (*p == '+') {
+      p++;
+      printf("  addi a0, a0, %d\n", (int)strtol(p, &p, 10));
+      continue;
+    } else if (*p == '-') {
+      p++;
+      printf(" addi a0, a0, -%d\n", (int)strtol(p, &p, 10));
+      continue;
+    }
+
+    fprintf(stderr, "unexcepted character: '%c'\n", *p);
+    return 1;
+  }
+
+
   // ret为jalr x0, x1, 0别名指令，用于返回子程序
   printf("  ret\n");
 
