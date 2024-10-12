@@ -27,7 +27,11 @@ int main(int Argc, char **Argv) {
   printf("  li a0, %d\n", (int)strtol(p, &p, 10));
 
   while (*p) {
-    if (*p == '+') {
+    // 跳过所有空格字符
+    if (*p == ' ') {
+      p++;
+      continue;
+    } else if (*p == '+') {
       p++;
       printf("  addi a0, a0, %d\n", (int)strtol(p, &p, 10));
       continue;
