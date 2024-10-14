@@ -1,6 +1,89 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+#include <stdarg.h>
+
+
+typedef enum {
+  TK_PUNCT, // 操作符：如+-
+  TK_NUM,
+  TK_EOF,   // 文件终止符，即文件的最后
+} TokenKind;
+
+typedef struct Token {
+  TokenKind kind;
+  struct Token *next;
+  int val;
+  char *loc;
+  int len;
+} Token;
+
+static void error(char *fmt, ...)
+{
+  va_list va;
+  va_start(va, fmt);
+  vfprintf(stderr, fmt, va);
+  fprintf(stderr, "\n");
+  va_end(va);
+  // 终止程序
+  exit(1);
+}
+
+static Token *newtoken(TokenKind kind, char *start)
+{
+  Token *tok = calloc(1, sizeof(Token));
+  tok->kind = kind;
+  tok->loc = start;
+  return tok;
+}
+
+static int getnumber(Token *tok)
+{
+  if (tok->kind != TK_NUM)
+    error("expect a number");
+  return tok->val;
+}
+static bool equal(Token *tok, char *str)
+{
+  return memcmp(tok->loc, str, tok->len) == 0 && str[tok->len] == 0;
+}
+
+static Token *tokenize(char *p)
+{
+  Token head = {};
+  Token *cur = &head;
+
+  while (*p) {
+    if (isspace(*p)) {
+      p++;
+      continue;
+    }
+    if (isdigit(*p)) {
+      cur->next = newtoken(TK_NUM, p);
+      cur = cur->next;
+      const char *oldp = p;
+      cur->val = strtol(p, &p, 10);
+      cur->len = p - oldp;
+      continue;
+    }
+    if (*p == '+' || *p == '-') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 1;
+      p++;
+      continue;
+    }
+
+    // 处理无法识别的字符
+    error("unexcepted character: '%c'\n", *p);
+  }
+
+  // 解析结束，增加一个EOF，表示终止符
+  cur->next = newtoken(TK_EOF, p);
+  return head.next;
+}
 
 int main(int Argc, char **Argv) {
   // 判断传入程序的参数是否为2个，Argv[0]为程序名称，Argv[1]为传入的第一个参数
@@ -15,7 +98,7 @@ int main(int Argc, char **Argv) {
   }
 
 
-  char *p = Argv[1];
+  Token *tok = tokenize(Argv[1]);
 
   // 声明一个全局main段，同时也是程序入口段
   printf("  .globl main\n");
@@ -24,24 +107,24 @@ int main(int Argc, char **Argv) {
   // li为addi别名指令，加载一个立即数到寄存器中
   // 传入程序的参数为str类型，因为需要转换为需要int类型，
   // atoi为“ASCII to integer”
-  printf("  li a0, %d\n", (int)strtol(p, &p, 10));
+  printf("  li a0, %d\n", getnumber(tok));
+  tok = tok->next;
 
-  while (*p) {
+  while (tok->kind != TK_EOF) {
     // 跳过所有空格字符
-    if (*p == ' ') {
-      p++;
+    if (equal(tok, "+")) {
+      tok = tok->next;
+      printf("  addi a0, a0, %d\n", getnumber(tok));
+      tok = tok->next;
       continue;
-    } else if (*p == '+') {
-      p++;
-      printf("  addi a0, a0, %d\n", (int)strtol(p, &p, 10));
-      continue;
-    } else if (*p == '-') {
-      p++;
-      printf(" addi a0, a0, -%d\n", (int)strtol(p, &p, 10));
+    }
+    if (equal(tok, "-")) {
+      tok = tok->next;
+      printf(" addi a0, a0, -%d\n", getnumber(tok));
+      tok = tok->next;
       continue;
     }
 
-    fprintf(stderr, "unexcepted character: '%c'\n", *p);
     return 1;
   }
 
