@@ -26,6 +26,7 @@ typedef enum {
   ND_SUB, // -
   ND_MUL, // *
   ND_DIV, // /
+  ND_NEG, // 负号
   ND_NUM, // INT NUMBER
 } NodeKind;
 
@@ -130,8 +131,13 @@ static Token *tokenize(char *p)
   return head.next;
 }
 
+// expr = mul ("+" mul | "-" mul)
+// mul = unary ("*" unary | "/" unary)
+// unary = ("+" | "-") unary | primary
+// primary  = "(" expr ")" | num
 static Node *expr(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
+static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
 
@@ -164,19 +170,19 @@ static Node *expr(Token **rest, Token *tok)
 // mul = primary( "*" primary | "/" primary)
 static Node *mul(Token **rest, Token *tok)
 {
-  Node *nd = primary(&tok, tok);
+  Node *nd = unary(&tok, tok);
 
   // ("*" primary | "/" primary)
   while (1) {
     // "*" primiary
     if (equal(tok, "*")) {
-      nd = newbinary(ND_MUL, nd, primary(&tok, tok->next));
+      nd = newbinary(ND_MUL, nd, unary(&tok, tok->next));
       continue;
     }
 
     // "/" primary
     if (equal(tok, "/")) {
-      nd = newbinary(ND_DIV, nd, primary(&tok, tok->next));
+      nd = newbinary(ND_DIV, nd, unary(&tok, tok->next));
       continue;
     }
 
@@ -185,6 +191,23 @@ static Node *mul(Token **rest, Token *tok)
   }
 }
 
+// unary = ("+" | "-") unary | primary
+static Node *unary(Token **rest, Token *tok)
+{
+  Node *nd = NULL;
+
+  // "+" unary
+  if (equal(tok, "+")) {
+    return unary(rest, tok->next);
+  }
+  // "-" unary
+  if (equal(tok, "-")) {
+    nd = newbinary(ND_NEG, NULL, unary(rest, tok->next));
+    return nd;
+  }
+
+  return primary(rest, tok);
+}
 // 解析括号、数字
 // premary = "(" expr ")" or num
 static Node *primary(Token **rest, Token *tok)
@@ -232,6 +255,12 @@ static void gen_expr(Node *nd)
     printf("  li a0, %d\n", nd->val);
     return;
   }
+  if (nd->kind == ND_NEG) {
+    gen_expr(nd->right);
+    printf("  neg a0, a0\n");
+    return;
+  }
+
 
   // 递归到最右下节点
   gen_expr(nd->right);
