@@ -26,11 +26,12 @@ typedef enum {
   ND_SUB, // -
   ND_MUL, // *
   ND_DIV, // /
-  ND_NEG, // 负号
+  ND_NEG, // 负号-
   ND_LT, // <
   ND_LE, // <=
   ND_NE, // !=
   ND_EQ, // ==
+  ND_EXPR_STMT, // 表达式语句
   ND_NUM, // INT NUMBER
 } NodeKind;
 
@@ -39,6 +40,7 @@ typedef enum {
 // 越往下，优先级越高
 typedef struct Node {
   NodeKind kind;
+  struct Node *next; // 下一节点，指代下一语句
   struct Node *left;
   struct Node *right;
   int val;
@@ -146,13 +148,14 @@ static Token *tokenize(char *p)
       p += 2;
       continue;
     }
-    if (ispunct(*p)) {
+    if (ispunct(*p) || *p == ';') {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;
       cur->len = 1;
       p++;
       continue;
     }
+
 
     // 处理无法识别的字符
     error("unexcepted character: '%c'\n", *p);
@@ -163,18 +166,42 @@ static Token *tokenize(char *p)
   return head.next;
 }
 
+// stmt = expr ("; expr")
 // expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-") unary | primary
 // primary  = "(" expr ")" | num
+static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
+// 语法分析入口函数
+Node *parse(Token **rest, Token *tok)
+{
+  Node head = {};
+  Node *cur = &head;
 
+  // stmt*
+  while (tok->kind != TK_EOF) {
+    cur->next = stmt(&tok, tok);
+    cur = cur->next;
+  }
+  *rest = tok;
+  return head.next;
+}
+
+// 解析表达式语句
+// stmt = expr;
+static Node *stmt(Token **rest, Token *tok)
+{
+  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
+  *rest = skip(tok, ";");
+  return nd;
+}
 
 // 解析条件运算符
 // expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
@@ -309,6 +336,8 @@ static Node *primary(Token **rest, Token *tok)
   return NULL;
 }
 
+
+
 // 存储栈的深度
 static int depth;
 
@@ -395,6 +424,15 @@ static void gen_expr(Node *nd)
   error("invalid expression\n");
 }
 
+static void gen_stmt(Node *nd)
+{
+  if (nd->kind == ND_EXPR_STMT) {
+    gen_expr(nd->right);
+    return;
+  }
+  error("invaild statement\n");
+}
+
 
 
 int main(int Argc, char **Argv) {
@@ -414,9 +452,9 @@ int main(int Argc, char **Argv) {
   Token *tok = tokenize(Argv[1]);
 
   // 语法分析
-  Node *node = expr(&tok, tok);
+  Node *node = parse(&tok, tok);
   if (tok->kind != TK_EOF)
-    error("extra token\n");
+    error("extra token, kind: %d\n", tok->kind);
 
   // 声明一个全局main段，同时也是程序入口段
   printf("  .globl main\n");
@@ -424,12 +462,14 @@ int main(int Argc, char **Argv) {
   printf("main:\n");
 
   // 使用语法树，生成表达式
-  gen_expr(node);
+  for (Node *nd = node; nd; nd = nd->next) {
+    gen_stmt(nd);
+    assert(depth == 0);
+  }
 
   // ret为jalr x0, x1, 0别名指令，用于返回子程序
   printf("  ret\n");
 
-  assert(depth == 0);
 
   return 0;
 }
