@@ -27,6 +27,10 @@ typedef enum {
   ND_MUL, // *
   ND_DIV, // /
   ND_NEG, // 负号
+  ND_LT, // <
+  ND_LE, // <=
+  ND_NE, // !=
+  ND_EQ, // ==
   ND_NUM, // INT NUMBER
 } NodeKind;
 
@@ -114,6 +118,34 @@ static Token *tokenize(char *p)
       cur->len = p - oldp;
       continue;
     }
+    if (*p == '=' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '!' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '<' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '>' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
     if (ispunct(*p)) {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;
@@ -131,20 +163,68 @@ static Token *tokenize(char *p)
   return head.next;
 }
 
-// expr = mul ("+" mul | "-" mul)
+// expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+// add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-") unary | primary
 // primary  = "(" expr ")" | num
 static Node *expr(Token **rest, Token *tok);
+static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
 
 
-// 解析加减
-// expr = mul ("+" mul | "-" mul)
+// 解析条件运算符
+// expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 static Node *expr(Token **rest, Token *tok)
+{
+  // add
+  Node *nd = add(&tok, tok);
+
+  // ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+  while (1) {
+    // "<" add
+    if (equal(tok, "<")) {
+      nd = newbinary(ND_LT, nd, add(&tok, tok->next));
+      continue;
+    }
+    // ">" add ==> 改变孩子的左右顺序转换成 "<" 的情况
+    if (equal(tok, ">")) {
+      nd = newbinary(ND_LT, add(&tok, tok->next), nd);
+      continue;
+    }
+    // "<=" add
+    if (equal(tok, "<=")) {
+      nd = newbinary(ND_LE, nd, add(&tok, tok->next));
+      continue;
+    }
+    // ">=" add ==> 改变孩子的左右顺序转换成 "<=" 的情况
+    if (equal(tok, ">=")) {
+      nd = newbinary(ND_LE, add(&tok, tok->next), nd);
+      continue;
+    }
+    // "!=" add
+    if (equal(tok, "!=")) {
+      nd = newbinary(ND_NE, nd, add(&tok, tok->next));
+      continue;
+    }
+    // "==" add
+    if (equal(tok, "==")) {
+      nd = newbinary(ND_EQ, nd, add(&tok, tok->next));
+      continue;
+    }
+
+    *rest = tok;
+    return nd;
+  }
+
+}
+
+// 解析加减
+// add = mul ("+" mul | "-" mul)
+static Node *add(Token **rest, Token *tok)
 {
   // mul
   Node *nd = mul(&tok, tok);
@@ -283,6 +363,30 @@ static void gen_expr(Node *nd)
     return;
   case ND_DIV:
     printf("  div a0, a0, a1\n");
+    return;
+  case ND_EQ:
+  case ND_NE:
+    // a0=a0^a1，异或指令
+    printf("  xor a0, a0, a1\n");
+    if (nd->kind == ND_EQ)
+      // a0==a1
+      // a0=a0^a1, sltiu a0, a0, 1
+      // 等于0则置1
+      printf("  seqz a0, a0\n");
+    else
+      // a0!=a1
+      // a0=a0^a1, sltu a0, x0, a0
+      // 不等于0则置1
+      printf("  snez a0, a0\n");
+    return;
+  case ND_LT:
+    printf("  slt a0, a0, a1\n");
+    return;
+  case ND_LE:
+    // a0<=a1等价于
+    // a0=a1<a0, a0=a1^1
+    printf("  slt a0, a1, a0\n");
+    printf("  xori a0, a0, 1\n");
     return;
   default:
     break;
