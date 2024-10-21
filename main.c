@@ -8,8 +8,9 @@
 
 
 typedef enum {
+  TK_IDENT, // 标记符，可以为变量名、函数名等
   TK_PUNCT, // 操作符：如+-
-  TK_NUM,
+  TK_NUM,   // 数字
   TK_EOF,   // 文件终止符，即文件的最后
 } TokenKind;
 
@@ -32,6 +33,8 @@ typedef enum {
   ND_NE, // !=
   ND_EQ, // ==
   ND_EXPR_STMT, // 表达式语句
+  ND_ASSIGN, // 赋值
+  ND_VAR, // 变量
   ND_NUM, // INT NUMBER
 } NodeKind;
 
@@ -43,7 +46,8 @@ typedef struct Node {
   struct Node *next; // 下一节点，指代下一语句
   struct Node *left;
   struct Node *right;
-  int val;
+  char name;         // 存储ND_VAR的字符串
+  int val;           // 存储ND_NUM种类的值
 } Node;
 
 static Node *newbinary(NodeKind kind, Node *left, Node *right)
@@ -59,6 +63,13 @@ static Node *newnum(int val)
 {
   Node *nd = newbinary(ND_NUM, NULL, NULL);
   nd->val = val;
+  return nd;
+}
+
+static Node *newvar(char name)
+{
+  Node *nd = newbinary(ND_VAR, NULL, NULL);
+  nd->name = name;
   return nd;
 }
 
@@ -120,6 +131,13 @@ static Token *tokenize(char *p)
       cur->len = p - oldp;
       continue;
     }
+    if (*p >= 'a' && *p <= 'z') {
+      cur->next = newtoken(TK_IDENT, p);
+      cur = cur->next;
+      cur->len = 1;
+      p++;
+      continue;
+    }
     if (*p == '=' && *(p+1) == '=') {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;
@@ -167,13 +185,17 @@ static Token *tokenize(char *p)
 }
 
 // stmt = expr ("; expr")
-// expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+// expr = assign
+// assign = equality ("=" assign)?
+// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-") unary | primary
 // primary  = "(" expr ")" | num
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
+static Node *assign(Token **rest, Token *tok);
+static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
@@ -203,9 +225,30 @@ static Node *stmt(Token **rest, Token *tok)
   return nd;
 }
 
-// 解析条件运算符
-// expr = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+
+// expr = assign
 static Node *expr(Token **rest, Token *tok)
+{ return assign(rest, tok); }
+
+// 解析赋值
+// assign = equality ("=" assign)?
+static Node *assign(Token **rest, Token *tok)
+{
+  Node *nd = equality(&tok, tok);
+
+  // 可能存在递归赋值，如a=b=1
+  // ("=" assign)
+  if (equal(tok, "=")) {
+    nd = newbinary(ND_ASSIGN, nd, assign(&tok, tok->next));
+  }
+
+  *rest = tok;
+  return nd;
+}
+
+// 解析条件运算符
+// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+static Node *equality(Token **rest, Token *tok)
 {
   // add
   Node *nd = add(&tok, tok);
@@ -315,8 +358,8 @@ static Node *unary(Token **rest, Token *tok)
 
   return primary(rest, tok);
 }
-// 解析括号、数字
-// premary = "(" expr ")" or num
+// 解析括号、数字、变量
+// premary = "(" expr ")" | ident | num
 static Node *primary(Token **rest, Token *tok)
 {
   // "(" expr ")"
@@ -325,7 +368,13 @@ static Node *primary(Token **rest, Token *tok)
     *rest = skip(tok, ")");
     return nd;
   }
-
+  // ident
+  if (tok->kind == TK_IDENT) {
+    Node *nd = newvar(*tok->loc);
+    *rest = tok->next;
+    return nd;
+  }
+  // num
   if (tok->kind == TK_NUM) {
     Node *nd = newnum(tok->val);
     *rest = tok->next;
@@ -340,6 +389,19 @@ static Node *primary(Token **rest, Token *tok)
 
 // 存储栈的深度
 static int depth;
+
+// 计算给定节点的绝对地址
+// 如果报错，说明节点不在栈中
+static void gen_addr(Node *nd)
+{
+  if (nd->kind == ND_VAR) {
+    // 偏移量=是两个字符在ASCII表中的距离+1再*8
+    int offset = (nd->name - 'a' + 1) * 8;
+    printf("  addi a0, fp, %d\n", -offset);
+    return;
+  }
+  error("not an lvalue");
+}
 
 // 压栈，将结果临时存入栈中备用。
 // 不实用寄存器存储的原因是需要存储变量的个数是变化的
@@ -367,6 +429,23 @@ static void gen_expr(Node *nd)
   if (nd->kind == ND_NEG) {
     gen_expr(nd->right);
     printf("  neg a0, a0\n");
+    return;
+  }
+  if (nd->kind == ND_ASSIGN) {
+    // 左部是左值，保存值到的地址
+    gen_addr(nd->left);
+    push();
+    // 右部是右值，为表达式的值
+    gen_expr(nd->right);
+    pop("a1");
+    printf("  sd a0, 0(a1)\n");
+    return;
+  }
+  if (nd->kind == ND_VAR) {
+    // 计算出变量的地址，然后存入a0
+    gen_addr(nd);
+    // 访问a0地址中存储的数据，存入到a0当中
+    printf("  ld a0, 0(a0)\n");
     return;
   }
 
@@ -461,11 +540,38 @@ int main(int Argc, char **Argv) {
   // main段标签
   printf("main:\n");
 
+  // 栈布局
+  //-------------------------------// sp
+  //              fp                  fp = sp-8
+  //-------------------------------// fp
+  //              'a'                 fp-8
+  //              'b'                 fp-16
+  //              ...
+  //              'z'                 fp-208
+  //-------------------------------// sp=sp-8-208
+  //           表达式计算
+  //-------------------------------//
+  // Prologue, 前言
+  // 将fp压入栈中，保存fp的值
+  printf("  addi sp, sp, -8\n");
+  printf("  sd fp, 0(sp)\n");
+  // 将sp写入fp
+  printf("  mv fp, sp\n");
+  // 26个字母*8字节=208字节，栈腾出208字节的空间
+  printf("  addi sp, sp, -208\n");
+
   // 使用语法树，生成表达式
   for (Node *nd = node; nd; nd = nd->next) {
     gen_stmt(nd);
     assert(depth == 0);
   }
+
+  // Epilogue, 后语
+  // 将fp的值改写回sp
+  printf("  mv sp, fp\n");
+  // 将最早fp保存的值弹栈，恢复fp
+  printf("  ld fp, 0(sp)\n");
+  printf("  addi sp, sp, 8\n");
 
   // ret为jalr x0, x1, 0别名指令，用于返回子程序
   printf("  ret\n");
