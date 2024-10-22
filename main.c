@@ -40,6 +40,7 @@ typedef enum {
   ND_EXPR_STMT, // 表达式语句
   ND_ASSIGN, // 赋值
   ND_RETURN, // 返回
+  ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
 } NodeKind;
@@ -55,6 +56,7 @@ typedef struct Node {
   struct Node *left;
   struct Node *right;
   Obj *var;          // 存储ND_VAL种类的变量
+  struct Node *body; // 代码块
   int val;           // 存储ND_NUM种类的值
 } Node;
 
@@ -97,6 +99,8 @@ static Obj *new_local(char *name)
   return obj;
 }
 
+// 新建一个二叉树节点
+// 某些类型的Node是需要left和right的，比如说+-
 static Node *newbinary(NodeKind kind, Node *left, Node *right)
 {
   Node *nd = calloc(1, sizeof(Node));
@@ -106,9 +110,18 @@ static Node *newbinary(NodeKind kind, Node *left, Node *right)
   return nd;
 }
 
+// 新建一个节点，不需要孩子
+// 可能通过Node其他成员来维护/访问
+// 比如说 compound_stmt ==> "{"
+static Node *newnode(NodeKind kind)
+{
+  return newbinary(kind, NULL, NULL);
+}
+
+
 static Node *newnum(int val)
 {
-  Node *nd = newbinary(ND_NUM, NULL, NULL);
+  Node *nd = newnode(ND_NUM);
   nd->val = val;
   return nd;
 }
@@ -264,14 +277,16 @@ static Token *tokenize(char *p)
   return head.next;
 }
 
-// stmt = ("return") expr (";")
+// compoundStmt = stmt* "}"
+// stmt = ("return") expr (";") | expr ";" | "{" compoundStmt
 // expr = assign
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-") unary | primary
-// primary  = "(" expr ")" | num
+// primary  = "(" expr ")" | num | ident
+static Node *compound_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
@@ -283,29 +298,46 @@ static Node *primary(Token **rest, Token *tok);
 
 
 // 语法分析入口函数
+// parse = "{" compoundStmt
 Function *parse(Token **rest, Token *tok)
+{
+  // "{"
+  tok = skip(tok, "{");
+
+  // 函数题存储语句的AST，locals存储变量
+  Function *prog = calloc(1, sizeof(Function));
+  prog->body = compound_stmt(rest, tok);
+  prog->locals = Locals;
+  return prog;
+}
+
+// compoundStmt = stmt* "}"
+static Node *compound_stmt(Token **rest, Token *tok)
 {
   Node head = {};
   Node *cur = &head;
 
   // stmt*
-  while (tok->kind != TK_EOF) {
+  while (!equal(tok, "}")) {
     cur->next = stmt(&tok, tok);
     cur = cur->next;
   }
-  *rest = tok;
 
-  // 函数题存储语句的AST，locals存储变量
-  Function *prog = calloc(1, sizeof(Function));
-  prog->body = head.next;
-  prog->locals = Locals;
-  return prog;
+  Node *nd = newnode(ND_BLOCK);
+  nd->body = head.next;
+  *rest = tok->next;
+  return nd;
 }
 
 // 解析表达式语句
 // stmt = expr;
 static Node *stmt(Token **rest, Token *tok)
 {
+  if (equal(tok, "{")) {
+    Node *nd = newnode(ND_BLOCK);
+    nd->body = compound_stmt(rest, tok->next);
+    return nd;
+  }
   if (equal(tok, "return")) {
     Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next));
     *rest = skip(tok, ";");
@@ -615,6 +647,12 @@ static void gen_expr(Node *nd)
 
 static void gen_stmt(Node *nd)
 {
+  if (nd->kind == ND_BLOCK) {
+    for (Node *n = nd->body; n; n = n->next) {
+      gen_stmt(n);
+    }
+    return;
+  }
   if (nd->kind == ND_RETURN) {
     gen_expr(nd->right);
     // 无条件跳转语句，跳转到.L.return段
@@ -679,10 +717,8 @@ int main(int Argc, char **Argv) {
   printf("  addi sp, sp, -%d\n", prog->stacksize);
 
   // 使用语法树，生成表达式
-  for (Node *nd = prog->body; nd; nd = nd->next) {
-    gen_stmt(nd);
-    assert(depth == 0);
-  }
+  gen_stmt(prog->body);
+  assert(depth == 0);
 
   // Epilogue, 后语
   // 输出return段标签
