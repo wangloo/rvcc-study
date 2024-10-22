@@ -14,6 +14,7 @@
 typedef enum {
   TK_IDENT, // 标记符，可以为变量名、函数名等
   TK_PUNCT, // 操作符：如+-
+  TK_KEYWORD, // 关键字
   TK_NUM,   // 数字
   TK_EOF,   // 文件终止符，即文件的最后
 } TokenKind;
@@ -38,6 +39,7 @@ typedef enum {
   ND_EQ, // ==
   ND_EXPR_STMT, // 表达式语句
   ND_ASSIGN, // 赋值
+  ND_RETURN, // 返回
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
 } NodeKind;
@@ -170,6 +172,16 @@ static bool isident2(char c)
   return isident1(c) || (c >= '0' && c <= '9');
 }
 
+// 将名为“return”的终结符转为KEYWORD
+static void convert_keywords(Token *tok)
+{
+  for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
+    if (equal(t, "return")) {
+      t->kind = TK_KEYWORD;
+    }
+  }
+}
+
 
 // 词法分析
 static Token *tokenize(char *p)
@@ -246,10 +258,13 @@ static Token *tokenize(char *p)
 
   // 解析结束，增加一个EOF，表示终止符
   cur->next = newtoken(TK_EOF, p);
+
+  // 将所有关键字的终结符，都标记为KEYWORD
+  convert_keywords(head.next);
   return head.next;
 }
 
-// stmt = expr ("; expr")
+// stmt = ("return") expr (";")
 // expr = assign
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
@@ -291,6 +306,11 @@ Function *parse(Token **rest, Token *tok)
 // stmt = expr;
 static Node *stmt(Token **rest, Token *tok)
 {
+  if (equal(tok, "return")) {
+    Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next));
+    *rest = skip(tok, ";");
+    return nd;
+  }
   Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
   *rest = skip(tok, ";");
   return nd;
@@ -595,11 +615,19 @@ static void gen_expr(Node *nd)
 
 static void gen_stmt(Node *nd)
 {
+  if (nd->kind == ND_RETURN) {
+    gen_expr(nd->right);
+    // 无条件跳转语句，跳转到.L.return段
+    // j offset是 jal x0, offset的别名指令
+    printf("  j .L.return\n");
+    return;
+  }
+
   if (nd->kind == ND_EXPR_STMT) {
     gen_expr(nd->right);
     return;
   }
-  error("invaild statement\n");
+  error("invalid statement\n");
 }
 
 
@@ -657,6 +685,8 @@ int main(int Argc, char **Argv) {
   }
 
   // Epilogue, 后语
+  // 输出return段标签
+  printf(".L.return:\n");
   // 将fp的值改写回sp
   printf("  mv sp, fp\n");
   // 将最早fp保存的值弹栈，恢复fp
