@@ -1,3 +1,7 @@
+// 使用POSIX.1标准
+// 使用了strndup函数
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +42,8 @@ typedef enum {
   ND_NUM, // INT NUMBER
 } NodeKind;
 
+typedef struct Obj Obj;
+
 // AST中二叉树节点
 // AST: 语法树
 // 越往下，优先级越高
@@ -46,9 +52,48 @@ typedef struct Node {
   struct Node *next; // 下一节点，指代下一语句
   struct Node *left;
   struct Node *right;
-  char name;         // 存储ND_VAR的字符串
+  Obj *var;          // 存储ND_VAL种类的变量
   int val;           // 存储ND_NUM种类的值
 } Node;
+
+
+// 本地变量
+typedef struct Obj {
+  struct Obj *next; // 指向下一个对象
+  char *name;       // 变量名
+  int offset;       // fp的偏移量
+} Obj;
+
+// 函数
+typedef struct Function {
+  Node *body;    // 函数体
+  Obj *locals;   // 本地变量
+  int stacksize; // 栈大小
+} Function;
+
+// 在解析时，全部的变量实例都被累加到这个列表里。
+Obj *Locals;
+
+static Obj *findvar(Token *tok)
+{
+  // 查找Locals变量中是否存在同名变量
+  for (Obj *var = Locals; var; var = var->next) {
+    if (strlen(var->name) == tok->len &&
+        !strncmp(tok->loc, var->name, tok->len)) {
+          return var;
+    }
+  }
+  return NULL;
+}
+
+static Obj *new_local(char *name)
+{
+  Obj *obj = calloc(1, sizeof(Obj));
+  obj->name = name;
+  obj->next = Locals;
+  Locals = obj;
+  return obj;
+}
 
 static Node *newbinary(NodeKind kind, Node *left, Node *right)
 {
@@ -66,10 +111,10 @@ static Node *newnum(int val)
   return nd;
 }
 
-static Node *newvar(char name)
+static Node *newvar(Obj *var)
 {
   Node *nd = newbinary(ND_VAR, NULL, NULL);
-  nd->name = name;
+  nd->var = var;
   return nd;
 }
 
@@ -111,6 +156,20 @@ static Token *skip(Token *tok, char *str)
   return tok->next;
 }
 
+// 判断标记符首字母规则
+// [a-zA-Z_]
+static bool isident1(char c)
+{
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_');
+}
+
+// 判断标记符的非首字母的规则
+// [a-zA-z0-9_]
+static bool isident2(char c)
+{
+  return isident1(c) || (c >= '0' && c <= '9');
+}
+
 
 // 词法分析
 static Token *tokenize(char *p)
@@ -131,13 +190,19 @@ static Token *tokenize(char *p)
       cur->len = p - oldp;
       continue;
     }
-    if (*p >= 'a' && *p <= 'z') {
-      cur->next = newtoken(TK_IDENT, p);
+    // 解析标记符
+    // [a-zA-Z_][a-zA-Z0-9_]*
+    if (isident1(*p)) {
+      char *start = p;
+      do {
+        p++;
+      } while (isident2(*p));
+      cur->next = newtoken(TK_IDENT,start);
       cur = cur->next;
-      cur->len = 1;
-      p++;
+      cur->len = p - start;
       continue;
     }
+
     if (*p == '=' && *(p+1) == '=') {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;
@@ -201,8 +266,9 @@ static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
+
 // 语法分析入口函数
-Node *parse(Token **rest, Token *tok)
+Function *parse(Token **rest, Token *tok)
 {
   Node head = {};
   Node *cur = &head;
@@ -213,7 +279,12 @@ Node *parse(Token **rest, Token *tok)
     cur = cur->next;
   }
   *rest = tok;
-  return head.next;
+
+  // 函数题存储语句的AST，locals存储变量
+  Function *prog = calloc(1, sizeof(Function));
+  prog->body = head.next;
+  prog->locals = Locals;
+  return prog;
 }
 
 // 解析表达式语句
@@ -370,9 +441,13 @@ static Node *primary(Token **rest, Token *tok)
   }
   // ident
   if (tok->kind == TK_IDENT) {
-    Node *nd = newvar(*tok->loc);
+    Obj *var = findvar(tok);
+    if (!var) {
+      // strndup复制n个字符
+      var = new_local(strndup(tok->loc, tok->len));
+    }
     *rest = tok->next;
-    return nd;
+    return newvar(var);
   }
   // num
   if (tok->kind == TK_NUM) {
@@ -390,14 +465,29 @@ static Node *primary(Token **rest, Token *tok)
 // 存储栈的深度
 static int depth;
 
+static int align_to(int n, int align)
+{
+  // 向上对齐 (0, align] 返回 align
+  return (n+align-1) & ~(align-1);
+}
+static void assign_lvar_offset(Function *prog)
+{
+  int offset = 0;
+  for (Obj *var = prog->locals; var; var = var->next) {
+    // 为每个变量分配8个字节
+    offset += 8;
+    var->offset = offset;
+  }
+  prog->stacksize = align_to(offset, 16);
+}
+
 // 计算给定节点的绝对地址
 // 如果报错，说明节点不在栈中
 static void gen_addr(Node *nd)
 {
   if (nd->kind == ND_VAR) {
-    // 偏移量=是两个字符在ASCII表中的距离+1再*8
-    int offset = (nd->name - 'a' + 1) * 8;
-    printf("  addi a0, fp, %d\n", -offset);
+    // 偏移量是相对fp的
+    printf("  addi a0, fp, %d\n", nd->var->offset);
     return;
   }
   error("not an lvalue");
@@ -531,9 +621,12 @@ int main(int Argc, char **Argv) {
   Token *tok = tokenize(Argv[1]);
 
   // 语法分析
-  Node *node = parse(&tok, tok);
+  Function *prog = parse(&tok, tok);
   if (tok->kind != TK_EOF)
     error("extra token, kind: %d\n", tok->kind);
+
+  // 分配函数内部变量的栈空间
+  assign_lvar_offset(prog);
 
   // 声明一个全局main段，同时也是程序入口段
   printf("  .globl main\n");
@@ -544,11 +637,8 @@ int main(int Argc, char **Argv) {
   //-------------------------------// sp
   //              fp                  fp = sp-8
   //-------------------------------// fp
-  //              'a'                 fp-8
-  //              'b'                 fp-16
-  //              ...
-  //              'z'                 fp-208
-  //-------------------------------// sp=sp-8-208
+  //              变量
+  //-------------------------------// sp=sp-8-stacksize
   //           表达式计算
   //-------------------------------//
   // Prologue, 前言
@@ -557,11 +647,11 @@ int main(int Argc, char **Argv) {
   printf("  sd fp, 0(sp)\n");
   // 将sp写入fp
   printf("  mv fp, sp\n");
-  // 26个字母*8字节=208字节，栈腾出208字节的空间
-  printf("  addi sp, sp, -208\n");
+  // sp偏移量为实际占用的栈大小
+  printf("  addi sp, sp, -%d\n", prog->stacksize);
 
   // 使用语法树，生成表达式
-  for (Node *nd = node; nd; nd = nd->next) {
+  for (Node *nd = prog->body; nd; nd = nd->next) {
     gen_stmt(nd);
     assert(depth == 0);
   }
