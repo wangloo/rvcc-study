@@ -41,6 +41,7 @@ typedef enum {
   ND_ASSIGN, // 赋值
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
+  ND_FOR,    // "for" 循环
   ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
@@ -60,11 +61,12 @@ typedef struct Node {
   struct Node *body; // 代码块
   int val;           // 存储ND_NUM种类的值
 
-  // if 语句
+  // if 语句 或者 "for" 语句
   struct Node *cond;  // 条件内的表达式
   struct Node *then;  // 符合条件后的语句
   struct Node *els;   // 不符合条件后的语句
-
+  struct Node *init;  // 初始化语句
+  struct Node *inc;   // 递增语句
 } Node;
 
 
@@ -194,7 +196,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"return", "if", "else"};
+  char *KW[] = {"return", "if", "else", "for"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
       return true;
@@ -295,9 +297,11 @@ static Token *tokenize(char *p)
 
 // compoundStmt = stmt* "}"
 // stmt = ("return") expr ";"
+//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
 //        | "{" compoundStmt
+// exprStmt = expt? ";"
 // expr = assign
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
@@ -306,6 +310,7 @@ static Token *tokenize(char *p)
 // unary = ("+" | "-") unary | primary
 // primary  = "(" expr ")" | num | ident
 static Node *compound_stmt(Token **rest, Token *tok);
+static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
@@ -350,11 +355,35 @@ static Node *compound_stmt(Token **rest, Token *tok)
 
 // 解析表达式语句
 // stmt = ("return") expr ";"
+//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
 //        | "{" compoundStmt
 static Node *stmt(Token **rest, Token *tok)
 {
+  // "for" "(" exprStmt expr? ";" expr? ")" stmt
+  if (equal(tok, "for")) {
+    Node *nd = newnode(ND_FOR);
+    tok = skip(tok->next, "(");
+    // init
+    // init的处理比较特殊，for 循环的init是一条statement，
+    // 后两个仅仅是语句。不用判空，因为在内部会判断
+    nd->init = expr_stmt(&tok, tok);
+    // cond
+    if (!equal(tok, ";")) {
+      nd->cond = expr(&tok, tok);
+    }
+    tok = skip(tok, ";");
+    // inc
+    if (!equal(tok, ")")) {
+      nd->inc = expr(&tok, tok);
+    }
+
+    tok = skip(tok, ")");
+    nd->then = stmt(&tok, tok);
+    *rest = tok;
+    return nd;
+  }
   // "if" "(" expr ")" stmt ("else" stmt)?
   if (equal(tok, "if")) {
     Node *nd = newnode(ND_IF);
@@ -394,6 +423,21 @@ static Node *stmt(Token **rest, Token *tok)
   return nd;
 }
 
+// 解析表达式语句
+// exprStmt = expr? ";"
+static Node *expr_stmt(Token **rest, Token *tok)
+{
+  // ";"
+  if (equal(tok, ";")) {
+    *rest = tok->next;
+    return newnode(ND_BLOCK);
+  }
+
+  // expr ";"
+  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
+  *rest = skip(tok, ";");
+  return nd;
+}
 
 // expr = assign
 static Node *expr(Token **rest, Token *tok)
@@ -700,6 +744,33 @@ static void gen_expr(Node *nd)
 
 static void gen_stmt(Node *nd)
 {
+  if (nd->kind == ND_FOR) {
+    // 代码段技术
+    int c = count();
+    // 生成初始化语句
+    if (nd->init)
+      gen_stmt(nd->init);
+    // 输出循环头部标签
+    printf(".L.begin.%d:\n", c);
+    // 处理循环条件语句
+    if (nd->cond) {
+      // 生成条件循环语句
+      gen_expr(nd->cond);
+      // 判断结果是否为0，为0则跳转到结束部分
+      printf("  beqz a0, .L.end.%d\n", c);
+    }
+    // 生成循环体语句
+    gen_stmt(nd->then);
+    // 处理循环递增语句
+    if (nd->inc)
+      // 生成循环递增语句
+      gen_expr(nd->inc);
+    // 跳转到循环头部
+    printf("  j .L.begin.%d\n", c);
+    // 输出循环尾部标签
+    printf(".L.end.%d:\n", c);
+    return;
+  }
   if (nd->kind == ND_IF) {
     // 代码段计数
     int c = count();
