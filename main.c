@@ -196,7 +196,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"return", "if", "else", "for"};
+  char *KW[] = {"return", "if", "else", "for", "while"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
       return true;
@@ -298,6 +298,7 @@ static Token *tokenize(char *p)
 // compoundStmt = stmt* "}"
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
+//        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
 //        | "{" compoundStmt
@@ -356,11 +357,23 @@ static Node *compound_stmt(Token **rest, Token *tok)
 // 解析表达式语句
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
+//        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
 //        | "{" compoundStmt
 static Node *stmt(Token **rest, Token *tok)
 {
+  // "while" "(" expr ")" stmt
+  if (equal(tok, "while")) {
+    Node *nd = newnode(ND_FOR);
+    tok = skip(tok->next, "(");
+    // cond
+    nd->cond = expr(&tok, tok);
+    tok = skip(tok, ")");
+    nd->then = stmt(&tok, tok);
+    *rest = tok;
+    return nd;
+  }
   // "for" "(" exprStmt expr? ";" expr? ")" stmt
   if (equal(tok, "for")) {
     Node *nd = newnode(ND_FOR);
