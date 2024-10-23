@@ -40,6 +40,7 @@ typedef enum {
   ND_EXPR_STMT, // 表达式语句
   ND_ASSIGN, // 赋值
   ND_RETURN, // 返回
+  ND_IF,     // "if" 条件判断
   ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
@@ -58,6 +59,12 @@ typedef struct Node {
   Obj *var;          // 存储ND_VAL种类的变量
   struct Node *body; // 代码块
   int val;           // 存储ND_NUM种类的值
+
+  // if 语句
+  struct Node *cond;  // 条件内的表达式
+  struct Node *then;  // 符合条件后的语句
+  struct Node *els;   // 不符合条件后的语句
+
 } Node;
 
 
@@ -185,11 +192,20 @@ static bool isident2(char c)
   return isident1(c) || (c >= '0' && c <= '9');
 }
 
+static bool iskeyword(Token *tok)
+{
+  char *KW[] = {"return", "if", "else"};
+  for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
+    if (equal(tok, KW[i]))
+      return true;
+  }
+  return false;
+}
 // 将名为“return”的终结符转为KEYWORD
 static void convert_keywords(Token *tok)
 {
   for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
-    if (equal(t, "return")) {
+    if (iskeyword(tok)) {
       t->kind = TK_KEYWORD;
     }
   }
@@ -278,7 +294,10 @@ static Token *tokenize(char *p)
 }
 
 // compoundStmt = stmt* "}"
-// stmt = ("return") expr (";") | expr ";" | "{" compoundStmt
+// stmt = ("return") expr ";"
+//        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | expr? ";"
+//        | "{" compoundStmt
 // expr = assign
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
@@ -330,18 +349,45 @@ static Node *compound_stmt(Token **rest, Token *tok)
 }
 
 // 解析表达式语句
-// stmt = expr;
+// stmt = ("return") expr ";"
+//        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | expr? ";"
+//        | "{" compoundStmt
 static Node *stmt(Token **rest, Token *tok)
 {
+  // "if" "(" expr ")" stmt ("else" stmt)?
+  if (equal(tok, "if")) {
+    Node *nd = newnode(ND_IF);
+    tok = skip(tok->next, "(");
+    nd->cond = expr(&tok, tok);
+    tok = skip(tok, ")");
+    nd->then = stmt(&tok, tok);
+    // "else" stmt
+    if (equal(tok, "else")) {
+      nd->els = stmt(&tok, tok->next);
+    }
+    *rest = tok;
+    return nd;
+  }
+
+  // "{" compoundStmt
   if (equal(tok, "{")) {
     Node *nd = newnode(ND_BLOCK);
     nd->body = compound_stmt(rest, tok->next);
     return nd;
   }
+  // "return" expr ";"
   if (equal(tok, "return")) {
     Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next));
     *rest = skip(tok, ";");
     return nd;
+  }
+  // 空语句判断
+  if (equal(tok, ";")) {
+    *rest = tok->next;
+    // 这里用一个body成员为空的ND_BLOCK来表示空语句，
+    // 因为在处理ND_BLOCK时会遍历body，空的话则不会产生影响
+    return newnode(ND_BLOCK);
   }
   Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
   *rest = skip(tok, ";");
@@ -562,6 +608,13 @@ static void pop(const char *reg)
   depth--;
 }
 
+// 代码段计数
+static int count(void)
+{
+  static int I = 1;
+  return I++;
+}
+
 static void gen_expr(Node *nd)
 {
   if (nd->kind == ND_NUM) {
@@ -647,6 +700,27 @@ static void gen_expr(Node *nd)
 
 static void gen_stmt(Node *nd)
 {
+  if (nd->kind == ND_IF) {
+    // 代码段计数
+    int c = count();
+    // 生成条件内语句
+    gen_expr(nd->cond);
+    // 判断结果是否为0，为0则跳转到else标签
+    printf("  beqz a0, .L.else.%d\n", c);
+    // 生成复合条件后的语句
+    gen_stmt(nd->then);
+    // 执行完后跳转到if语句后面的语句
+    printf("  j .L.end.%d\n", c);
+    // else代码块，else可能为空，故输出标签
+    printf(".L.else.%d:\n", c);
+        // 生成不符合条件后的语句
+    if (nd->els)
+      gen_stmt(nd->els);
+    // 结束if语句，继续执行后面的语句
+    printf(".L.end.%d:\n", c);
+
+    return;
+  }
   if (nd->kind == ND_BLOCK) {
     for (Node *n = nd->body; n; n = n->next) {
       gen_stmt(n);
