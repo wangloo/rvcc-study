@@ -1,88 +1,4 @@
-// 使用POSIX.1标准
-// 使用了strndup函数
-#define _POSIX_C_SOURCE 200809L
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
-#include <stdarg.h>
-#include <assert.h>
-
-
-typedef enum {
-  TK_IDENT, // 标记符，可以为变量名、函数名等
-  TK_PUNCT, // 操作符：如+-
-  TK_KEYWORD, // 关键字
-  TK_NUM,   // 数字
-  TK_EOF,   // 文件终止符，即文件的最后
-} TokenKind;
-
-typedef struct Token {
-  TokenKind kind;
-  struct Token *next;
-  int val;
-  char *loc;
-  int len;
-} Token;
-
-typedef enum {
-  ND_ADD, // +
-  ND_SUB, // -
-  ND_MUL, // *
-  ND_DIV, // /
-  ND_NEG, // 负号-
-  ND_LT, // <
-  ND_LE, // <=
-  ND_NE, // !=
-  ND_EQ, // ==
-  ND_EXPR_STMT, // 表达式语句
-  ND_ASSIGN, // 赋值
-  ND_RETURN, // 返回
-  ND_IF,     // "if" 条件判断
-  ND_FOR,    // "for" 循环
-  ND_BLOCK,  // 代码块（花括号）
-  ND_VAR, // 变量
-  ND_NUM, // INT NUMBER
-} NodeKind;
-
-typedef struct Obj Obj;
-
-// AST中二叉树节点
-// AST: 语法树
-// 越往下，优先级越高
-typedef struct Node {
-  NodeKind kind;
-  struct Node *next; // 下一节点，指代下一语句
-  struct Node *left;
-  struct Node *right;
-  Obj *var;          // 存储ND_VAL种类的变量
-  struct Node *body; // 代码块
-  int val;           // 存储ND_NUM种类的值
-
-  // if 语句 或者 "for" 语句
-  struct Node *cond;  // 条件内的表达式
-  struct Node *then;  // 符合条件后的语句
-  struct Node *els;   // 不符合条件后的语句
-  struct Node *init;  // 初始化语句
-  struct Node *inc;   // 递增语句
-} Node;
-
-
-// 本地变量
-typedef struct Obj {
-  struct Obj *next; // 指向下一个对象
-  char *name;       // 变量名
-  int offset;       // fp的偏移量
-} Obj;
-
-// 函数
-typedef struct Function {
-  Node *body;    // 函数体
-  Obj *locals;   // 本地变量
-  int stacksize; // 栈大小
-} Function;
+#include "rvcc.h"
 
 // 在解析时，全部的变量实例都被累加到这个列表里。
 Obj *Locals;
@@ -110,190 +26,42 @@ static Obj *new_local(char *name)
 
 // 新建一个二叉树节点
 // 某些类型的Node是需要left和right的，比如说+-
-static Node *newbinary(NodeKind kind, Node *left, Node *right)
+static Node *newbinary(NodeKind kind, Node *left, Node *right, Token *tok)
 {
   Node *nd = calloc(1, sizeof(Node));
   nd->kind = kind;
   nd->left = left;
   nd->right = right;
+  nd->tok = tok;
   return nd;
 }
 
 // 新建一个节点，不需要孩子
 // 可能通过Node其他成员来维护/访问
 // 比如说 compound_stmt ==> "{"
-static Node *newnode(NodeKind kind)
+static Node *newnode(NodeKind kind, Token *tok)
 {
-  return newbinary(kind, NULL, NULL);
+  return newbinary(kind, NULL, NULL, tok);
 }
 
 
-static Node *newnum(int val)
+static Node *newnum(int val, Token *tok)
 {
-  Node *nd = newnode(ND_NUM);
+  Node *nd = newnode(ND_NUM, tok);
   nd->val = val;
   return nd;
 }
 
-static Node *newvar(Obj *var)
+static Node *newvar(Obj *var, Token *tok)
 {
-  Node *nd = newbinary(ND_VAR, NULL, NULL);
+  Node *nd = newbinary(ND_VAR, NULL, NULL, tok);
   nd->var = var;
   return nd;
 }
 
-static void error(char *fmt, ...)
-{
-  va_list va;
-  va_start(va, fmt);
-  vfprintf(stderr, fmt, va);
-  fprintf(stderr, "\n");
-  va_end(va);
-  // 终止程序
-  exit(1);
-}
-
-static Token *newtoken(TokenKind kind, char *start)
-{
-  Token *tok = calloc(1, sizeof(Token));
-  tok->kind = kind;
-  tok->loc = start;
-  return tok;
-}
-
-static int getnumber(Token *tok)
-{
-  if (tok->kind != TK_NUM)
-    error("expect a number");
-  return tok->val;
-}
-static bool equal(Token *tok, char *str)
-{
-  return memcmp(tok->loc, str, tok->len) == 0 && str[tok->len] == 0;
-}
-
-// 跳过指定的Str
-static Token *skip(Token *tok, char *str)
-{
-  if (!equal(tok, str))
-    error("expect: %s\n", str);
-  return tok->next;
-}
-
-// 判断标记符首字母规则
-// [a-zA-Z_]
-static bool isident1(char c)
-{
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_');
-}
-
-// 判断标记符的非首字母的规则
-// [a-zA-z0-9_]
-static bool isident2(char c)
-{
-  return isident1(c) || (c >= '0' && c <= '9');
-}
-
-static bool iskeyword(Token *tok)
-{
-  char *KW[] = {"return", "if", "else", "for", "while"};
-  for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
-    if (equal(tok, KW[i]))
-      return true;
-  }
-  return false;
-}
-// 将名为“return”的终结符转为KEYWORD
-static void convert_keywords(Token *tok)
-{
-  for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
-    if (iskeyword(tok)) {
-      t->kind = TK_KEYWORD;
-    }
-  }
-}
 
 
-// 词法分析
-static Token *tokenize(char *p)
-{
-  Token head = {};
-  Token *cur = &head;
 
-  while (*p) {
-    if (isspace(*p)) {
-      p++;
-      continue;
-    }
-    if (isdigit(*p)) {
-      cur->next = newtoken(TK_NUM, p);
-      cur = cur->next;
-      const char *oldp = p;
-      cur->val = strtol(p, &p, 10);
-      cur->len = p - oldp;
-      continue;
-    }
-    // 解析标记符
-    // [a-zA-Z_][a-zA-Z0-9_]*
-    if (isident1(*p)) {
-      char *start = p;
-      do {
-        p++;
-      } while (isident2(*p));
-      cur->next = newtoken(TK_IDENT,start);
-      cur = cur->next;
-      cur->len = p - start;
-      continue;
-    }
-
-    if (*p == '=' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '!' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '<' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '>' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (ispunct(*p) || *p == ';') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 1;
-      p++;
-      continue;
-    }
-
-
-    // 处理无法识别的字符
-    error("unexcepted character: '%c'\n", *p);
-  }
-
-  // 解析结束，增加一个EOF，表示终止符
-  cur->next = newtoken(TK_EOF, p);
-
-  // 将所有关键字的终结符，都标记为KEYWORD
-  convert_keywords(head.next);
-  return head.next;
-}
 
 // compoundStmt = stmt* "}"
 // stmt = ("return") expr ";"
@@ -348,7 +116,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
     cur = cur->next;
   }
 
-  Node *nd = newnode(ND_BLOCK);
+  Node *nd = newnode(ND_BLOCK, tok);
   nd->body = head.next;
   *rest = tok->next;
   return nd;
@@ -365,7 +133,7 @@ static Node *stmt(Token **rest, Token *tok)
 {
   // "while" "(" expr ")" stmt
   if (equal(tok, "while")) {
-    Node *nd = newnode(ND_FOR);
+    Node *nd = newnode(ND_FOR, tok);
     tok = skip(tok->next, "(");
     // cond
     nd->cond = expr(&tok, tok);
@@ -376,7 +144,7 @@ static Node *stmt(Token **rest, Token *tok)
   }
   // "for" "(" exprStmt expr? ";" expr? ")" stmt
   if (equal(tok, "for")) {
-    Node *nd = newnode(ND_FOR);
+    Node *nd = newnode(ND_FOR, tok);
     tok = skip(tok->next, "(");
     // init
     // init的处理比较特殊，for 循环的init是一条statement，
@@ -399,7 +167,7 @@ static Node *stmt(Token **rest, Token *tok)
   }
   // "if" "(" expr ")" stmt ("else" stmt)?
   if (equal(tok, "if")) {
-    Node *nd = newnode(ND_IF);
+    Node *nd = newnode(ND_IF, tok);
     tok = skip(tok->next, "(");
     nd->cond = expr(&tok, tok);
     tok = skip(tok, ")");
@@ -414,13 +182,13 @@ static Node *stmt(Token **rest, Token *tok)
 
   // "{" compoundStmt
   if (equal(tok, "{")) {
-    Node *nd = newnode(ND_BLOCK);
+    Node *nd = newnode(ND_BLOCK, tok);
     nd->body = compound_stmt(rest, tok->next);
     return nd;
   }
   // "return" expr ";"
   if (equal(tok, "return")) {
-    Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next));
+    Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next), tok);
     *rest = skip(tok, ";");
     return nd;
   }
@@ -429,9 +197,9 @@ static Node *stmt(Token **rest, Token *tok)
     *rest = tok->next;
     // 这里用一个body成员为空的ND_BLOCK来表示空语句，
     // 因为在处理ND_BLOCK时会遍历body，空的话则不会产生影响
-    return newnode(ND_BLOCK);
+    return newnode(ND_BLOCK, tok);
   }
-  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
+  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok), tok);
   *rest = skip(tok, ";");
   return nd;
 }
@@ -443,11 +211,11 @@ static Node *expr_stmt(Token **rest, Token *tok)
   // ";"
   if (equal(tok, ";")) {
     *rest = tok->next;
-    return newnode(ND_BLOCK);
+    return newnode(ND_BLOCK, tok);
   }
 
   // expr ";"
-  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok));
+  Node *nd = newbinary(ND_EXPR_STMT, NULL, expr(&tok, tok), tok);
   *rest = skip(tok, ";");
   return nd;
 }
@@ -465,7 +233,7 @@ static Node *assign(Token **rest, Token *tok)
   // 可能存在递归赋值，如a=b=1
   // ("=" assign)
   if (equal(tok, "=")) {
-    nd = newbinary(ND_ASSIGN, nd, assign(&tok, tok->next));
+    nd = newbinary(ND_ASSIGN, nd, assign(&tok, tok->next), tok);
   }
 
   *rest = tok;
@@ -483,32 +251,32 @@ static Node *equality(Token **rest, Token *tok)
   while (1) {
     // "<" add
     if (equal(tok, "<")) {
-      nd = newbinary(ND_LT, nd, add(&tok, tok->next));
+      nd = newbinary(ND_LT, nd, add(&tok, tok->next), tok);
       continue;
     }
     // ">" add ==> 改变孩子的左右顺序转换成 "<" 的情况
     if (equal(tok, ">")) {
-      nd = newbinary(ND_LT, add(&tok, tok->next), nd);
+      nd = newbinary(ND_LT, add(&tok, tok->next), nd, tok);
       continue;
     }
     // "<=" add
     if (equal(tok, "<=")) {
-      nd = newbinary(ND_LE, nd, add(&tok, tok->next));
+      nd = newbinary(ND_LE, nd, add(&tok, tok->next), tok);
       continue;
     }
     // ">=" add ==> 改变孩子的左右顺序转换成 "<=" 的情况
     if (equal(tok, ">=")) {
-      nd = newbinary(ND_LE, add(&tok, tok->next), nd);
+      nd = newbinary(ND_LE, add(&tok, tok->next), nd, tok);
       continue;
     }
     // "!=" add
     if (equal(tok, "!=")) {
-      nd = newbinary(ND_NE, nd, add(&tok, tok->next));
+      nd = newbinary(ND_NE, nd, add(&tok, tok->next), tok);
       continue;
     }
     // "==" add
     if (equal(tok, "==")) {
-      nd = newbinary(ND_EQ, nd, add(&tok, tok->next));
+      nd = newbinary(ND_EQ, nd, add(&tok, tok->next), tok);
       continue;
     }
 
@@ -529,12 +297,12 @@ static Node *add(Token **rest, Token *tok)
   while (1) {
     // "+" mul
     if (equal(tok, "+")) {
-      nd = newbinary(ND_ADD, nd, mul(&tok, tok->next));
+      nd = newbinary(ND_ADD, nd, mul(&tok, tok->next), tok);
       continue;
     }
     // "-" mul
     if (equal(tok, "-")) {
-      nd = newbinary(ND_SUB, nd, mul(&tok, tok->next));
+      nd = newbinary(ND_SUB, nd, mul(&tok, tok->next), tok);
       continue;
     }
 
@@ -552,13 +320,13 @@ static Node *mul(Token **rest, Token *tok)
   while (1) {
     // "*" primiary
     if (equal(tok, "*")) {
-      nd = newbinary(ND_MUL, nd, unary(&tok, tok->next));
+      nd = newbinary(ND_MUL, nd, unary(&tok, tok->next), tok);
       continue;
     }
 
     // "/" primary
     if (equal(tok, "/")) {
-      nd = newbinary(ND_DIV, nd, unary(&tok, tok->next));
+      nd = newbinary(ND_DIV, nd, unary(&tok, tok->next), tok);
       continue;
     }
 
@@ -578,7 +346,7 @@ static Node *unary(Token **rest, Token *tok)
   }
   // "-" unary
   if (equal(tok, "-")) {
-    nd = newbinary(ND_NEG, NULL, unary(rest, tok->next));
+    nd = newbinary(ND_NEG, NULL, unary(rest, tok->next), tok);
     return nd;
   }
 
@@ -602,11 +370,11 @@ static Node *primary(Token **rest, Token *tok)
       var = new_local(strndup(tok->loc, tok->len));
     }
     *rest = tok->next;
-    return newvar(var);
+    return newvar(var, tok);
   }
   // num
   if (tok->kind == TK_NUM) {
-    Node *nd = newnum(tok->val);
+    Node *nd = newnum(tok->val, tok);
     *rest = tok->next;
     return nd;
   }
@@ -647,7 +415,7 @@ static void gen_addr(Node *nd)
     printf("  addi a0, fp, %d\n", nd->var->offset);
     return;
   }
-  error("not an lvalue");
+  errorTok(nd->tok, "not an lvalue");
 }
 
 // 压栈，将结果临时存入栈中备用。
@@ -767,7 +535,7 @@ static void gen_expr(Node *nd)
     break;
   }
 
-  error("invalid expression\n");
+  errorTok(nd->tok, "invalid expression\n");
 }
 
 static void gen_stmt(Node *nd)
@@ -856,7 +624,7 @@ static void gen_stmt(Node *nd)
     gen_expr(nd->right);
     return;
   }
-  error("invalid statement\n");
+  errorTok(nd->tok, "invalid statement\n");
 }
 
 
