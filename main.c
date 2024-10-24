@@ -76,7 +76,7 @@ static Node *newvar(Obj *var, Token *tok)
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
-// unary = ("+" | "-") unary | primary
+// unary = ("+" | "-" | "&" | "*") unary | primary
 // primary  = "(" expr ")" | num | ident
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
@@ -335,7 +335,7 @@ static Node *mul(Token **rest, Token *tok)
   }
 }
 
-// unary = ("+" | "-") unary | primary
+// unary = ("+" | "-" | "&" | "*") unary | primary
 static Node *unary(Token **rest, Token *tok)
 {
   Node *nd = NULL;
@@ -347,6 +347,16 @@ static Node *unary(Token **rest, Token *tok)
   // "-" unary
   if (equal(tok, "-")) {
     nd = newbinary(ND_NEG, NULL, unary(rest, tok->next), tok);
+    return nd;
+  }
+  // "&" unary
+  if (equal(tok, "&")) {
+    nd = newbinary(ND_ADDR, NULL, unary(rest, tok->next), tok);
+    return nd;
+  }
+  // "*" unary
+  if (equal(tok, "*")) {
+    nd = newbinary(ND_DEREF, NULL, unary(rest, tok->next), tok);
     return nd;
   }
 
@@ -399,11 +409,12 @@ static void assign_lvar_offset(Function *prog)
   for (Obj *var = prog->locals; var; var = var->next) {
     // 为每个变量分配8个字节
     offset += 8;
-    var->offset = offset;
+    var->offset = -offset;
   }
   prog->stacksize = align_to(offset, 16);
 }
 
+static void gen_expr(Node *nd);
 // 计算给定节点的绝对地址
 // 如果报错，说明节点不在栈中
 static void gen_addr(Node *nd)
@@ -413,6 +424,11 @@ static void gen_addr(Node *nd)
     printf("  # 获取变量%s的栈内地址为%d(fp)\n", nd->var->name,
            nd->var->offset);
     printf("  addi a0, fp, %d\n", nd->var->offset);
+    return;
+  }
+  // &* expr == expr
+  if (nd->kind == ND_DEREF) {
+    gen_expr(nd->right);
     return;
   }
   errorTok(nd->tok, "not an lvalue");
@@ -455,6 +471,18 @@ static void gen_expr(Node *nd)
     gen_expr(nd->right);
     printf("  # 对a0值进行取反\n");
     printf("  neg a0, a0\n");
+    return;
+  }
+  // 解引用
+  if (nd->kind == ND_DEREF) {
+    gen_expr(nd->right);
+    printf("  # 读取a0中存放的地址，得到的值存入a0\n");
+    printf("  ld a0, 0(a0)\n");
+    return;
+  }
+  // 取地址
+  if (nd->kind == ND_ADDR) {
+    gen_addr(nd->right);
     return;
   }
   if (nd->kind == ND_ASSIGN) {

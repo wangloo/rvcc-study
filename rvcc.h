@@ -41,6 +41,8 @@ typedef enum {
   ND_EQ, // ==
   ND_EXPR_STMT, // 表达式语句
   ND_ASSIGN, // 赋值
+  ND_ADDR,      // 取地址 &
+  ND_DEREF,     // 解引用 *
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
   ND_FOR,    // "for" 循环
