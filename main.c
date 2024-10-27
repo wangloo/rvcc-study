@@ -59,9 +59,72 @@ static Node *newvar(Obj *var, Token *tok)
   return nd;
 }
 
+static Node *newadd(Node *left, Node *right, Token *tok)
+{
+  // 为左右部添加类型
+  // 在stmt之后确实会对整个语法树 add_type
+  // 但是在stmt解析的过程中，就会调用new_sub/new_add，
+  // 这里面就会需要这个加减法子树的type树，所以在这里添加
+  add_type(left);
+  add_type(right);
 
+  // num + num
+  if (is_integer(left->ty) && is_integer(right->ty))
+    return newbinary(ND_ADD, left, right, tok);
 
+  // 不能解析 ptr + ptr
+  if (left->ty->kind == TY_PTR
+      && right->ty->kind == TY_PTR)
+    errorTok(tok, "invalid operands");
 
+  // 将 num + ptr 转换为 ptr + num
+  if (left->ty->kind == TY_INT
+      && right->ty->kind == TY_PTR) {
+    Node *tmp = left;
+    left = right;
+    right = tmp;
+  }
+
+  // ptr + num
+  // 指针加法， ptr+1，不是1个字节，而是一个元素的空间，所以需要 x8
+  right = newbinary(ND_MUL, right, newnum(8, tok), tok);
+  return newbinary(ND_ADD, left, right, tok);
+}
+
+static Node *newsub(Node *left, Node *right, Token *tok)
+{
+  // 为左右部添加类型
+  // 在stmt之后确实会对整个语法树 add_type
+  // 但是在stmt解析的过程中，就会调用new_sub/new_add，
+  // 这里面就会需要这个加减法子树的type树，所以在这里添加
+  add_type(left);
+  add_type(right);
+
+  // num - num
+  if (is_integer(left->ty) && is_integer(right->ty))
+    return newbinary(ND_SUB, left, right, tok);
+
+  // ptr - num
+  if (left->ty->kind == TY_PTR
+      && right->ty->kind == TY_INT) {
+    right = newbinary(ND_MUL, right, newnum(8, tok), tok);
+    add_type(right);
+    Node *nd = newbinary(ND_SUB, left, right, tok);
+    // 节点类型为指针
+    nd->ty = left->ty;
+    return nd;
+  }
+
+  // ptr - ptr，返回两指针之间有多少元素
+  if (left->ty->kind == TY_PTR
+      && right->ty->kind == TY_PTR) {
+    Node *nd = newbinary(ND_SUB, left, right, tok);
+    nd->ty = TyInt;
+    return newbinary(ND_DIV, nd, newnum(8, tok), tok);
+  }
+  errorTok(tok, "invalid operands");
+  return NULL;
+}
 
 // compoundStmt = stmt* "}"
 // stmt = ("return") expr ";"
@@ -114,6 +177,8 @@ static Node *compound_stmt(Token **rest, Token *tok)
   while (!equal(tok, "}")) {
     cur->next = stmt(&tok, tok);
     cur = cur->next;
+    // 构造完AST后，为节点添加类型信息
+    add_type(cur);
   }
 
   Node *nd = newnode(ND_BLOCK, tok);
@@ -297,12 +362,12 @@ static Node *add(Token **rest, Token *tok)
   while (1) {
     // "+" mul
     if (equal(tok, "+")) {
-      nd = newbinary(ND_ADD, nd, mul(&tok, tok->next), tok);
+      nd = newadd(nd, mul(&tok, tok->next), tok);
       continue;
     }
     // "-" mul
     if (equal(tok, "-")) {
-      nd = newbinary(ND_SUB, nd, mul(&tok, tok->next), tok);
+      nd = newsub(nd, mul(&tok, tok->next), tok);
       continue;
     }
 

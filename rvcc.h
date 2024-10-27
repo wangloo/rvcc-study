@@ -52,6 +52,7 @@ typedef enum {
 } NodeKind;
 
 typedef struct Obj Obj;
+typedef struct Type Type;
 
 // AST中二叉树节点
 // AST: 语法树
@@ -60,6 +61,7 @@ typedef struct Node {
   NodeKind kind;
   struct Node *next; // 下一节点，指代下一语句
   Token *tok;        // 节点对应的终结符
+  Type *ty;          // 节点中数据的类型
   struct Node *left;
   struct Node *right;
   Obj *var;          // 存储ND_VAL种类的变量
@@ -89,6 +91,28 @@ typedef struct Function {
   int stacksize; // 栈大小
 } Function;
 
+//
+// 类型系统
+//
+
+// 类型种类
+typedef enum {
+  TY_INT, // int 整型
+  TY_PTR, // 指针
+} TypeKind;
+
+typedef struct Type {
+  TypeKind kind;     // 种类
+  struct Type *base; // 指向的类型
+} Type;
+
+// 声明一个全局变量，定义在type.c中
+extern Type *TyInt;
+
+// 判断是否为整型
+bool is_integer(Type *ty);
+// 为节点内部的所有节点添加类型
+void add_type(Node *nd);
 
 
 
@@ -100,3 +124,4 @@ bool equal(Token *Tok, char *Str);
 Token *skip(Token *Tok, char *Str);
 // 词法分析
 Token *tokenize(char *Input);
+void add_type(Node *nd);
