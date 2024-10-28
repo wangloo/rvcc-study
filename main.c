@@ -15,13 +15,22 @@ static Obj *findvar(Token *tok)
   return NULL;
 }
 
-static Obj *new_local(char *name)
+static Obj *new_local(char *name, Type *ty)
 {
   Obj *obj = calloc(1, sizeof(Obj));
   obj->name = name;
   obj->next = Locals;
+  obj->ty = ty;
   Locals = obj;
   return obj;
+}
+
+// 获取标识符
+static char *get_ident(Token *tok)
+{
+  if (tok->kind != TK_IDENT)
+    errorTok(tok, "expected an identifier");
+  return strndup(tok->loc, tok->len);
 }
 
 // 新建一个二叉树节点
@@ -126,7 +135,37 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
-// compoundStmt = stmt* "}"
+// declspec = "int"
+// declarator specifier
+static Type *declspec(Token **rest, Token *tok)
+{
+  *rest = skip(tok, "int");
+  return TyInt;
+}
+
+// declarator = "*"* ident
+static Type *declarator(Token **rest, Token *tok, Type *ty)
+{
+  // "*"*
+  // 构建所有的（多重）指针
+  while (consume(&tok, tok, "*"))
+    ty = pointerto(ty);
+
+  if (tok->kind != TK_IDENT)
+    errorTok(tok, "expected a variable name");
+
+  // ident
+  // 变量名
+  ty->name = tok;
+  *rest = tok->next;
+  return ty;
+}
+
+// compoundStmt = (declaration | stmt*) "}"
+// declaration =
+//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+// declspec = "int"
+// declarator = "*"* ident
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
@@ -142,6 +181,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // unary = ("+" | "-" | "&" | "*") unary | primary
 // primary  = "(" expr ")" | num | ident
 static Node *compound_stmt(Token **rest, Token *tok);
+static Node *declaration(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
@@ -167,7 +207,52 @@ Function *parse(Token **rest, Token *tok)
   return prog;
 }
 
-// compoundStmt = stmt* "}"
+// declaration =
+//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+static Node *declaration(Token **rest, Token *tok)
+{
+  // declspec
+  // 声明的 基础类型
+  Type *basety = declspec(&tok, tok);
+
+  Node head = {};
+  Node *cur = &head;
+  // 对变量声明次数的计数
+  int i = 0;
+
+  // (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+  while (!equal(tok, ";")) {
+    // 第1个变量不必匹配 ","
+    if (i++ > 0)
+      tok = skip(tok, ",");
+
+    // declarator
+    Type *ty = declarator(&tok, tok, basety);
+    Obj *var = new_local(get_ident(ty->name), ty);
+
+    // 如果不存在"="则为变量声明，不需要生成节点，已经存储在Locals中了
+    if (!equal(tok, "="))
+      continue;
+
+    // 解析"="后面的token
+    Node *left = newvar(var, ty->name);
+    // 解析递归赋值语句
+    // tok->next 跳过 "="
+    Node *right = expr(&tok, tok->next);
+    Node *node = newbinary(ND_ASSIGN, left, right, tok);
+    // 存放在表达式语句中
+    cur->next = newbinary(ND_EXPR_STMT, NULL, node, tok);
+    cur = cur->next;
+  }
+
+  // 将所有表达式语句，存放在代码块中
+  Node *nd = newnode(ND_BLOCK, tok);
+  nd->body = head.next;
+  *rest = tok->next;
+  return nd;
+}
+
+// compoundStmt = (declaration | stmt*) "}"
 static Node *compound_stmt(Token **rest, Token *tok)
 {
   Node head = {};
@@ -175,7 +260,12 @@ static Node *compound_stmt(Token **rest, Token *tok)
 
   // stmt*
   while (!equal(tok, "}")) {
-    cur->next = stmt(&tok, tok);
+    // declaration
+    if (equal(tok, "int"))
+      cur->next = declaration(&tok, tok);
+    // stmt
+    else
+      cur->next = stmt(&tok, tok);
     cur = cur->next;
     // 构造完AST后，为节点添加类型信息
     add_type(cur);
@@ -441,8 +531,8 @@ static Node *primary(Token **rest, Token *tok)
   if (tok->kind == TK_IDENT) {
     Obj *var = findvar(tok);
     if (!var) {
-      // strndup复制n个字符
-      var = new_local(strndup(tok->loc, tok->len));
+      // 未声明就使用变量，报错
+      errorTok(tok, "undefined variable");
     }
     *rest = tok->next;
     return newvar(var, tok);

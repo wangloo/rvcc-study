@@ -65,6 +65,20 @@ Token *skip(Token *tok, char *str)
   return tok->next;
 }
 
+// 消耗掉指定的Token
+// 和skip差不多，但是对不存在的情况处理不同
+bool consume(Token **rest, Token *tok, char *str)
+{
+  // 存在
+  if (equal(tok, str)) {
+    *rest = tok->next;
+    return true;
+  }
+  // 不存在
+  *rest = tok;
+  return false;
+}
+
 // 判断标记符首字母规则
 // [a-zA-Z_]
 static bool isident1(char c)
@@ -81,7 +95,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"return", "if", "else", "for", "while"};
+  char *KW[] = {"int", "return", "if", "else", "for", "while"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
       return true;

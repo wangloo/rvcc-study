@@ -81,6 +81,7 @@ typedef struct Node {
 typedef struct Obj {
   struct Obj *next; // 指向下一个对象
   char *name;       // 变量名
+  Type *ty;         // 变量类型
   int offset;       // fp的偏移量
 } Obj;
 
@@ -104,10 +105,16 @@ typedef enum {
 typedef struct Type {
   TypeKind kind;     // 种类
   struct Type *base; // 指向的类型
+
+  // 变量名？
+  Token *name;
 } Type;
 
 // 声明一个全局变量，定义在type.c中
 extern Type *TyInt;
+
+// 构建一个指针类型，并指向基类
+Type *pointerto(Type *Base);
 
 // 判断是否为整型
 bool is_integer(Type *ty);
@@ -122,6 +129,7 @@ void errorTok(Token *Tok, char *Fmt, ...);
 // 判断Token与Str的关系
 bool equal(Token *Tok, char *Str);
 Token *skip(Token *Tok, char *Str);
+bool consume(Token **Rest, Token *Tok, char *Str);
 // 词法分析
 Token *tokenize(char *Input);
 void add_type(Node *nd);
