@@ -70,7 +70,8 @@ typedef struct Node {
   int val;           // 存储ND_NUM种类的值
 
   // 函数调用
-  char *func_name;
+  char *func_name;    // 函数名
+  struct Node *args;  // 函数参数
 
   // if 语句 或者 "for" 语句
   struct Node *cond;  // 条件内的表达式

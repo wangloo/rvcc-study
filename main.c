@@ -135,6 +135,39 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
+
+// compoundStmt = (declaration | stmt*) "}"
+// declaration =
+//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+// declspec = "int"
+// declarator = "*"* ident
+// stmt = ("return") expr ";"
+//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
+//        | "while" "(" expr ")" stmt
+//        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | expr? ";"
+//        | "{" compoundStmt
+// exprStmt = expt? ";"
+// expr = assign
+// assign = equality ("=" assign)?
+// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
+// add = mul ("+" mul | "-" mul)
+// mul = unary ("*" unary | "/" unary)
+// unary = ("+" | "-" | "&" | "*") unary | primary
+// primary  = "(" expr ")" | num | funcall
+// funcall = ident "(" (assign ("," assign)*)? ")"
+static Node *compound_stmt(Token **rest, Token *tok);
+static Node *declaration(Token **rest, Token *tok);
+static Node *expr_stmt(Token **rest, Token *tok);
+static Node *stmt(Token **rest, Token *tok);
+static Node *expr(Token **rest, Token *tok);
+static Node *assign(Token **rest, Token *tok);
+static Node *equality(Token **rest, Token *tok);
+static Node *add(Token **rest, Token *tok);
+static Node *mul(Token **rest, Token *tok);
+static Node *unary(Token **rest, Token *tok);
+static Node *primary(Token **rest, Token *tok);
+
 // declspec = "int"
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
@@ -161,37 +194,28 @@ static Type *declarator(Token **rest, Token *tok, Type *ty)
   return ty;
 }
 
-// compoundStmt = (declaration | stmt*) "}"
-// declaration =
-//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
-// declspec = "int"
-// declarator = "*"* ident
-// stmt = ("return") expr ";"
-//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
-//        | "while" "(" expr ")" stmt
-//        | "if" "(" expr ")" stmt ("else" stmt)?
-//        | expr? ";"
-//        | "{" compoundStmt
-// exprStmt = expt? ";"
-// expr = assign
-// assign = equality ("=" assign)?
-// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
-// add = mul ("+" mul | "-" mul)
-// mul = unary ("*" unary | "/" unary)
-// unary = ("+" | "-" | "&" | "*") unary | primary
-// primary  = "(" expr ")" | num | ident args?
-// args = "(" ")"
-static Node *compound_stmt(Token **rest, Token *tok);
-static Node *declaration(Token **rest, Token *tok);
-static Node *expr_stmt(Token **rest, Token *tok);
-static Node *stmt(Token **rest, Token *tok);
-static Node *expr(Token **rest, Token *tok);
-static Node *assign(Token **rest, Token *tok);
-static Node *equality(Token **rest, Token *tok);
-static Node *add(Token **rest, Token *tok);
-static Node *mul(Token **rest, Token *tok);
-static Node *unary(Token **rest, Token *tok);
-static Node *primary(Token **rest, Token *tok);
+// ident "(" (assign ("," assign)*)? ")"
+static Node *funcall(Token **rest, Token *tok)
+{
+  Node head = {};
+  Node *cur = &head;
+  Token *start = tok;
+
+  tok = tok->next->next;
+  while (!equal(tok, ")")) {
+    if (cur != &head)
+      tok = skip(tok, ",");
+    cur->next = assign(&tok, tok);
+    cur = cur->next;
+  }
+
+  Node *nd = newnode(ND_FUNCALL, tok);
+  nd->func_name = strndup(start->loc, start->len);
+  nd->args = head.next;
+  *rest = skip(tok, ")");
+  return nd;
+}
+
 
 
 // 语法分析入口函数
@@ -519,7 +543,7 @@ static Node *unary(Token **rest, Token *tok)
   return primary(rest, tok);
 }
 // 解析括号、数字、变量
-// premary = "(" expr ")" | ident | num
+// premary = "(" expr ")" | num | funcall
 static Node *primary(Token **rest, Token *tok)
 {
   // "(" expr ")"
@@ -533,11 +557,7 @@ static Node *primary(Token **rest, Token *tok)
     // 函数调用
     // args = "(" ")"
     if (equal(tok->next, "(")) {
-      Node *nd = newnode(ND_FUNCALL, tok);
-      // ident
-      nd->func_name = strndup(tok->loc, tok->len);
-      *rest = skip(tok->next->next, ")");
-      return nd;
+      return funcall(rest, tok);
     } else {
       Obj *var = findvar(tok);
       if (!var) {
@@ -563,6 +583,8 @@ static Node *primary(Token **rest, Token *tok)
 
 // 存储栈的深度
 static int depth;
+// 用于函数参数的寄存器们
+static char *ArgReg[] = {"a0", "a1", "a2", "a3", "a4", "a5"};
 
 static int align_to(int n, int align)
 {
@@ -663,6 +685,18 @@ static void gen_expr(Node *nd)
     return;
   }
   if (nd->kind == ND_FUNCALL) {
+    // 记录参数个数
+    int nargs = 0;
+    // 计算所有参数的值，正向压栈
+    for (Node *arg = nd->args; arg; arg = arg->next) {
+      gen_expr(arg);
+      push();
+      nargs++;
+    }
+    // 反向弹栈, a0->参数1, a1->参数2
+    for (int i = nargs-1; i >= 0; i--)
+      pop(ArgReg[i]);
+
     printf("\n # 调用函数%s\n", nd->func_name);
     printf("  call %s\n", nd->func_name);
     return;
