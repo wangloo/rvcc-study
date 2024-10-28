@@ -54,6 +54,7 @@ void add_type(Node *nd)
   case ND_LE:
   case ND_VAR:
   case ND_NUM:
+  case ND_FUNCALL:
     nd->ty = TyInt;
     return;
   // 将节点类型设为指针，并指向左部的类型

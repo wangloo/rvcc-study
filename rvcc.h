@@ -46,6 +46,7 @@ typedef enum {
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
   ND_FOR,    // "for" 循环
+  ND_FUNCALL, // 函数调用
   ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
@@ -67,6 +68,9 @@ typedef struct Node {
   Obj *var;          // 存储ND_VAL种类的变量
   struct Node *body; // 代码块
   int val;           // 存储ND_NUM种类的值
+
+  // 函数调用
+  char *func_name;
 
   // if 语句 或者 "for" 语句
   struct Node *cond;  // 条件内的表达式

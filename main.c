@@ -179,7 +179,8 @@ static Type *declarator(Token **rest, Token *tok, Type *ty)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | primary
-// primary  = "(" expr ")" | num | ident
+// primary  = "(" expr ")" | num | ident args?
+// args = "(" ")"
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
@@ -527,15 +528,25 @@ static Node *primary(Token **rest, Token *tok)
     *rest = skip(tok, ")");
     return nd;
   }
-  // ident
+  // ident args?
   if (tok->kind == TK_IDENT) {
-    Obj *var = findvar(tok);
-    if (!var) {
-      // 未声明就使用变量，报错
-      errorTok(tok, "undefined variable");
+    // 函数调用
+    // args = "(" ")"
+    if (equal(tok->next, "(")) {
+      Node *nd = newnode(ND_FUNCALL, tok);
+      // ident
+      nd->func_name = strndup(tok->loc, tok->len);
+      *rest = skip(tok->next->next, ")");
+      return nd;
+    } else {
+      Obj *var = findvar(tok);
+      if (!var) {
+        // 未声明就使用变量，报错
+        errorTok(tok, "undefined variable");
+      }
+      *rest = tok->next;
+      return newvar(var, tok);
     }
-    *rest = tok->next;
-    return newvar(var, tok);
   }
   // num
   if (tok->kind == TK_NUM) {
@@ -649,6 +660,11 @@ static void gen_expr(Node *nd)
     pop("a1");
     printf("  # 将a0的值，写入到a1中存放的地址\n");
     printf("  sd a0, 0(a1)\n");
+    return;
+  }
+  if (nd->kind == ND_FUNCALL) {
+    printf("\n # 调用函数%s\n", nd->func_name);
+    printf("  call %s\n", nd->func_name);
     return;
   }
   if (nd->kind == ND_VAR) {
@@ -844,16 +860,21 @@ int main(int Argc, char **Argv) {
 
   // 栈布局
   //-------------------------------// sp
-  //              fp                  fp = sp-8
-  //-------------------------------// fp
+  //              ra
+  //-------------------------------// ra = sp-8
+  //              fp
+  //-------------------------------// fp = sp-16
   //              变量
-  //-------------------------------// sp=sp-8-stacksize
+  //-------------------------------// sp=sp-16-stacksize
   //           表达式计算
   //-------------------------------//
   // Prologue, 前言
+  // 将ra寄存器压栈，保存ra的值
+  printf("  # 将ra寄存器压栈,保存ra的值\n");
+  printf("  addi sp, sp, -16\n");
+  printf("  sd ra, 8(sp)\n");
   // 将fp压入栈中，保存fp的值
   printf("  # 将fp压栈，fp属于“被调用者保存”的寄存器，需要恢复原值\n");
-  printf("  addi sp, sp, -8\n");
   printf("  sd fp, 0(sp)\n");
   // 将sp写入fp
   printf("  # 将sp的值写入fp\n");
@@ -878,7 +899,10 @@ int main(int Argc, char **Argv) {
   // 将最早fp保存的值弹栈，恢复fp
   printf("  # 将最早fp保存的值弹栈，恢复fp和sp\n");
   printf("  ld fp, 0(sp)\n");
-  printf("  addi sp, sp, 8\n");
+  // 将ra寄存器弹栈,恢复ra的值
+  printf("  # 将ra寄存器弹栈,恢复ra的值\n");
+  printf("  ld ra, 8(sp)\n");
+  printf("  addi sp, sp, 16\n");
 
   // ret为jalr x0, x1, 0别名指令，用于返回子程序
   printf("  # 返回a0值给系统调用\n");
