@@ -135,12 +135,14 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
-
+// program = functionDefinition*
+// functionDefinition = declspec declarator "{" compoundStmt
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 // declspec = "int"
-// declarator = "*"* ident
+// declarator = "*"* ident typeSuffix
+// typeSuffix = ("(" ")")?
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
@@ -156,6 +158,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // unary = ("+" | "-" | "&" | "*") unary | primary
 // primary  = "(" expr ")" | num | funcall
 // funcall = ident "(" (assign ("," assign)*)? ")"
+Function *function(Token **rest, Token *tok);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
@@ -176,7 +179,19 @@ static Type *declspec(Token **rest, Token *tok)
   return TyInt;
 }
 
-// declarator = "*"* ident
+static Type *type_suffix(Token **rest, Token *tok, Type *ty)
+{
+  // ("(" ")")
+  if (equal(tok, "(")) {
+    // 目前只支持0参数函数定义
+    *rest = skip(tok->next, ")");
+    return functype(ty);
+  }
+  *rest = tok;
+  return ty;
+}
+
+// declarator = "*"* ident typesuffix
 static Type *declarator(Token **rest, Token *tok, Type *ty)
 {
   // "*"*
@@ -187,10 +202,12 @@ static Type *declarator(Token **rest, Token *tok, Type *ty)
   if (tok->kind != TK_IDENT)
     errorTok(tok, "expected a variable name");
 
+  // typeSuffix
+  ty = type_suffix(rest, tok->next, ty);
+
   // ident
-  // 变量名
+  // 变量名 or 函数名
   ty->name = tok;
-  *rest = tok->next;
   return ty;
 }
 
@@ -219,18 +236,44 @@ static Node *funcall(Token **rest, Token *tok)
 
 
 // 语法分析入口函数
-// parse = "{" compoundStmt
+// program = functionDefinition*
 Function *parse(Token **rest, Token *tok)
 {
+  Function head = {};
+  Function *cur = &head;
+
+  while (tok->kind != TK_EOF) {
+    cur->next = function(&tok, tok);
+    cur = cur->next;
+  }
+  *rest = tok;
+  return head.next;
+}
+
+// functionDefinition = declspec declarator "{" compoundStmt
+Function *function(Token **rest, Token *tok)
+{
+  // declspec
+  Type *ty = declspec(&tok, tok);
+  // declarator
+  ty = declarator(&tok, tok, ty);
+
+  // 清空全局变量Locals
+  Locals = NULL;
+
+  // 从解析完成的ty中读取ident
+  Function *fn = calloc(1, sizeof(Function));
+  fn->name = get_ident(ty->name);
+
   // "{"
   tok = skip(tok, "{");
 
   // 函数题存储语句的AST，locals存储变量
-  Function *prog = calloc(1, sizeof(Function));
-  prog->body = compound_stmt(rest, tok);
-  prog->locals = Locals;
-  return prog;
+  fn->body = compound_stmt(rest, tok);
+  fn->locals = Locals;
+  return fn;
 }
+
 
 // declaration =
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -585,6 +628,8 @@ static Node *primary(Token **rest, Token *tok)
 static int depth;
 // 用于函数参数的寄存器们
 static char *ArgReg[] = {"a0", "a1", "a2", "a3", "a4", "a5"};
+// 当前的函数
+static Function *current_fn;
 
 static int align_to(int n, int align)
 {
@@ -848,8 +893,8 @@ static void gen_stmt(Node *nd)
     gen_expr(nd->right);
     // 无条件跳转语句，跳转到.L.return段
     // j offset是 jal x0, offset的别名指令
-    printf("  # 跳转到.L.return段\n");
-    printf("  j .L.return\n");
+    printf("  # 跳转到.L.return.%s段\n", current_fn->name);
+    printf("  j .L.return.%s\n", current_fn->name);
     return;
   }
 
@@ -886,62 +931,64 @@ int main(int Argc, char **Argv) {
   // 分配函数内部变量的栈空间
   assign_lvar_offset(prog);
 
-  printf("  # 定义全局main段\n");
-  printf("  .globl main\n");
-  printf("\n# =====程序开始===============\n");
-  printf("# main段标签，也是程序入口段\n");
-  printf("main:\n");
+  // 为每个函数单独生成代码
+  for (Function *fn = prog; fn; fn = fn->next) {
+    printf("  # 定义全局%s段\n", fn->name);
+    printf("  .globl %s\n", fn->name);
+    printf("\n# =====程序开始===============\n");
+    printf("# %s段标签，也是程序入口段\n", fn->name);
+    printf("%s:\n", fn->name);
+    current_fn = fn;
+    // 栈布局
+    //-------------------------------// sp
+    //              ra
+    //-------------------------------// ra = sp-8
+    //              fp
+    //-------------------------------// fp = sp-16
+    //              变量
+    //-------------------------------// sp=sp-16-stacksize
+    //           表达式计算
+    //-------------------------------//
 
-  // 栈布局
-  //-------------------------------// sp
-  //              ra
-  //-------------------------------// ra = sp-8
-  //              fp
-  //-------------------------------// fp = sp-16
-  //              变量
-  //-------------------------------// sp=sp-16-stacksize
-  //           表达式计算
-  //-------------------------------//
-  // Prologue, 前言
-  // 将ra寄存器压栈，保存ra的值
-  printf("  # 将ra寄存器压栈,保存ra的值\n");
-  printf("  addi sp, sp, -16\n");
-  printf("  sd ra, 8(sp)\n");
-  // 将fp压入栈中，保存fp的值
-  printf("  # 将fp压栈，fp属于“被调用者保存”的寄存器，需要恢复原值\n");
-  printf("  sd fp, 0(sp)\n");
-  // 将sp写入fp
-  printf("  # 将sp的值写入fp\n");
-  printf("  mv fp, sp\n");
-  // sp偏移量为实际占用的栈大小
-  printf("  # sp腾出StackSize大小的栈空间\n");
-  printf("  addi sp, sp, -%d\n", prog->stacksize);
+    // Prologue, 前言
+    // 将ra寄存器压栈，保存ra的值
+    printf("  # 将ra寄存器压栈,保存ra的值\n");
+    printf("  addi sp, sp, -16\n");
+    printf("  sd ra, 8(sp)\n");
+    // 将fp压入栈中，保存fp的值
+    printf("  # 将fp压栈，fp属于“被调用者保存”的寄存器，需要恢复原值\n");
+    printf("  sd fp, 0(sp)\n");
+    // 将sp写入fp
+    printf("  # 将sp的值写入fp\n");
+    printf("  mv fp, sp\n");
+    // sp偏移量为实际占用的栈大小
+    printf("  # sp腾出StackSize大小的栈空间\n");
+    printf("  addi sp, sp, -%d\n", fn->stacksize);
 
-  // 使用语法树，生成表达式
-  printf("\n# =====程序主体===============\n");
-  gen_stmt(prog->body);
-  assert(depth == 0);
+    // 使用语法树，生成表达式
+    printf("\n# =====%s主体===============\n", fn->name);
+    gen_stmt(fn->body);
+    assert(depth == 0);
 
-  // Epilogue, 后语
-  // 输出return段标签
-  printf("\n# =====程序结束===============\n");
-  printf("# return段标签\n");
-  printf(".L.return:\n");
-  // 将fp的值改写回sp
-  printf("  # 将fp的值写回sp\n");
-  printf("  mv sp, fp\n");
-  // 将最早fp保存的值弹栈，恢复fp
-  printf("  # 将最早fp保存的值弹栈，恢复fp和sp\n");
-  printf("  ld fp, 0(sp)\n");
-  // 将ra寄存器弹栈,恢复ra的值
-  printf("  # 将ra寄存器弹栈,恢复ra的值\n");
-  printf("  ld ra, 8(sp)\n");
-  printf("  addi sp, sp, 16\n");
+    // Epilogue, 后语
+    // 输出return段标签
+    printf("\n# =====%s结束===============\n", fn->name);
+    printf("# return段标签\n");
+    printf(".L.return.%s:\n", fn->name);
+    // 将fp的值改写回sp
+    printf("  # 将fp的值写回sp\n");
+    printf("  mv sp, fp\n");
+    // 将最早fp保存的值弹栈，恢复fp
+    printf("  # 将最早fp保存的值弹栈，恢复fp和sp\n");
+    printf("  ld fp, 0(sp)\n");
+    // 将ra寄存器弹栈,恢复ra的值
+    printf("  # 将ra寄存器弹栈,恢复ra的值\n");
+    printf("  ld ra, 8(sp)\n");
+    printf("  addi sp, sp, 16\n");
 
-  // ret为jalr x0, x1, 0别名指令，用于返回子程序
-  printf("  # 返回a0值给系统调用\n");
-  printf("  ret\n");
-
-
+    // ret为jalr x0, x1, 0别名指令，用于返回子程序
+    printf("  # 返回a0值给系统调用\n");
+    printf("  ret\n");
+  }
   return 0;
 }

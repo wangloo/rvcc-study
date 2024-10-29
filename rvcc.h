@@ -92,9 +92,11 @@ typedef struct Obj {
 
 // 函数
 typedef struct Function {
-  Node *body;    // 函数体
-  Obj *locals;   // 本地变量
-  int stacksize; // 栈大小
+  struct Function *next; // 下一函数，所有函数链接在一起
+  Node *body;            // 函数体
+  Obj *locals;           // 本地变量
+  char *name;            // 函数名
+  int stacksize;         // 栈大小
 } Function;
 
 //
@@ -105,6 +107,7 @@ typedef struct Function {
 typedef enum {
   TY_INT, // int 整型
   TY_PTR, // 指针
+  TY_FUNC, // 函数
 } TypeKind;
 
 typedef struct Type {
@@ -113,6 +116,9 @@ typedef struct Type {
 
   // 变量名？
   Token *name;
+
+  // 函数类型
+  Type *returnty; // 函数返回的类型
 } Type;
 
 // 声明一个全局变量，定义在type.c中
@@ -120,6 +126,8 @@ extern Type *TyInt;
 
 // 构建一个指针类型，并指向基类
 Type *pointerto(Type *Base);
+// 函数类型
+Type *functype(Type *ReturnTy);
 
 // 判断是否为整型
 bool is_integer(Type *ty);

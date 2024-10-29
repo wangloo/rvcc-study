@@ -16,6 +16,13 @@ Type *pointerto(Type *base)
   return ty;
 }
 
+Type *functype(Type *returnty)
+{
+  Type *ty = calloc(1, sizeof(Type));
+  ty->kind = TY_FUNC;
+  ty->returnty = returnty;
+  return ty;
+}
 
 // 为节点内的所有节点添加类型
 void add_type(Node *nd)
