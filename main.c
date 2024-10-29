@@ -142,7 +142,9 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 // declspec = "int"
 // declarator = "*"* ident typeSuffix
-// typeSuffix = ("(" ")")?
+// typeSuffix = ("(" funcParams? ")")?
+// funcParams = param ("," param)*
+// param = declspec declarator
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
@@ -161,6 +163,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 Function *function(Token **rest, Token *tok);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok);
+static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
@@ -179,13 +182,34 @@ static Type *declspec(Token **rest, Token *tok)
   return TyInt;
 }
 
+// typeSuffix = ("(" funcParams? ")")?
+// funcParams = param ("," param)*
+// param = declspec declarator
 static Type *type_suffix(Token **rest, Token *tok, Type *ty)
 {
   // ("(" ")")
   if (equal(tok, "(")) {
-    // 目前只支持0参数函数定义
-    *rest = skip(tok->next, ")");
-    return functype(ty);
+    tok = skip(tok, "(");
+    // 存储形参的链表
+    Type head = {};
+    Type *cur = &head;
+
+    while (!equal(tok, ")")) {
+      // param ("," param)*
+      if (cur != &head)
+        tok = skip(tok, ",");
+      Type *basety = declspec(&tok, tok);
+      Type *declarty = declarator(&tok, tok, basety);
+      cur->next = copytype(declarty);
+      cur = cur->next;
+    }
+    // 封装一个函数节点
+    ty =  functype(ty);
+    // 传递形参
+    ty->params = head.next;
+    *rest = tok->next;
+    return ty;
+
   }
   *rest = tok;
   return ty;
@@ -250,6 +274,17 @@ Function *parse(Token **rest, Token *tok)
   return head.next;
 }
 
+static void create_param_lvars(Type *param)
+{
+  if (param) {
+    // 递归到形参最底部
+    // 现将最底部的加入Locals中，之后的都逐个加入到顶部，保持顺序不变
+    create_param_lvars(param->next);
+    // 添加到Locals中
+    new_local(get_ident(param->name), param);
+  }
+}
+
 // functionDefinition = declspec declarator "{" compoundStmt
 Function *function(Token **rest, Token *tok)
 {
@@ -263,7 +298,11 @@ Function *function(Token **rest, Token *tok)
 
   // 从解析完成的ty中读取ident
   Function *fn = calloc(1, sizeof(Function));
+  // 函数名
   fn->name = get_ident(ty->name);
+  // 函数参数
+  create_param_lvars(ty->params);
+  fn->params = Locals;
 
   // "{"
   tok = skip(tok, "{");
@@ -638,14 +677,19 @@ static int align_to(int n, int align)
 }
 static void assign_lvar_offset(Function *prog)
 {
-  int offset = 0;
-  for (Obj *var = prog->locals; var; var = var->next) {
-    // 为每个变量分配8个字节
-    offset += 8;
-    var->offset = -offset;
+  // 为每个函数计算其所用的栈空间
+  for (Function *fn = prog; fn; fn = fn->next) {
+    int offset = 0;
+    for (Obj *var = fn->locals; var; var = var->next) {
+      // 为每个变量分配8个字节
+      offset += 8;
+      var->offset = -offset;
+    }
+    fn->stacksize = align_to(offset, 16);
   }
-  prog->stacksize = align_to(offset, 16);
 }
+
+
 
 static void gen_expr(Node *nd);
 // 计算给定节点的绝对地址
@@ -964,6 +1008,13 @@ int main(int Argc, char **Argv) {
     // sp偏移量为实际占用的栈大小
     printf("  # sp腾出StackSize大小的栈空间\n");
     printf("  addi sp, sp, -%d\n", fn->stacksize);
+
+    int I = 0;
+    for (Obj *var=fn->params; var; var = var->next) {
+      printf("  # 将%s寄存器的值存入%s的栈地址\n", ArgReg[I], var->name);
+      printf("  sd %s, %d(fp)\n", ArgReg[I++], var->offset);
+    }
+
 
     // 使用语法树，生成表达式
     printf("\n# =====%s主体===============\n", fn->name);

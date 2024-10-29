@@ -93,6 +93,7 @@ typedef struct Obj {
 // 函数
 typedef struct Function {
   struct Function *next; // 下一函数，所有函数链接在一起
+  Obj *params;           // 形参
   Node *body;            // 函数体
   Obj *locals;           // 本地变量
   char *name;            // 函数名
@@ -119,6 +120,8 @@ typedef struct Type {
 
   // 函数类型
   Type *returnty; // 函数返回的类型
+  Type *params;   // 形参
+  Type *next;     // 下一类型（目前仅用于形参）
 } Type;
 
 // 声明一个全局变量，定义在type.c中
@@ -133,6 +136,8 @@ Type *functype(Type *ReturnTy);
 bool is_integer(Type *ty);
 // 为节点内部的所有节点添加类型
 void add_type(Node *nd);
+// 复制类型
+Type *copytype(Type *ty);
 
 
 
