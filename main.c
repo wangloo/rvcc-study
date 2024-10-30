@@ -95,8 +95,8 @@ static Node *newadd(Node *left, Node *right, Token *tok)
   }
 
   // ptr + num
-  // 指针加法， ptr+1，不是1个字节，而是一个元素的空间，所以需要 x8
-  right = newbinary(ND_MUL, right, newnum(8, tok), tok);
+  // 指针加法， ptr+1，不是1个字节，而是一个元素的空间，所以需要 *size 操作
+  right = newbinary(ND_MUL, right, newnum(left->ty->base->size, tok), tok);
   return newbinary(ND_ADD, left, right, tok);
 }
 
@@ -129,7 +129,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
       && right->ty->kind == TY_PTR) {
     Node *nd = newbinary(ND_SUB, left, right, tok);
     nd->ty = TyInt;
-    return newbinary(ND_DIV, nd, newnum(8, tok), tok);
+    return newbinary(ND_DIV, nd, newnum(left->ty->base->size, tok), tok);
   }
   errorTok(tok, "invalid operands");
   return NULL;
@@ -142,8 +142,8 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 // declspec = "int"
 // declarator = "*"* ident typeSuffix
-// typeSuffix = ("(" funcParams? ")")?
-// funcParams = param ("," param)*
+// typeSuffix = "(" funcParams | "[" num "]" | ε
+// funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
 // stmt = ("return") expr ";"
 //        | "for" "(" exprStmt expr? ";" expr? ")" stmt
@@ -182,35 +182,48 @@ static Type *declspec(Token **rest, Token *tok)
   return TyInt;
 }
 
-// typeSuffix = ("(" funcParams? ")")?
-// funcParams = param ("," param)*
+// funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
+static Type *func_params(Token **rest, Token *tok, Type *ty)
+{
+  // 存储形参的链表
+  Type head = {};
+  Type *cur = &head;
+
+  while (!equal(tok, ")")) {
+    // param ("," param)*
+    if (cur != &head)
+      tok = skip(tok, ",");
+    Type *basety = declspec(&tok, tok);
+    Type *declarty = declarator(&tok, tok, basety);
+    cur->next = copytype(declarty);
+    cur = cur->next;
+  }
+  // 封装一个函数节点
+  ty = functype(ty);
+  // 传递形参
+  ty->params = head.next;
+  *rest = tok->next;
+  return ty;
+}
+
+// typeSuffix = "(" funcParams | "[" num "]" | ε
 static Type *type_suffix(Token **rest, Token *tok, Type *ty)
 {
-  // ("(" ")")
+  // "(" funcParams
   if (equal(tok, "(")) {
-    tok = skip(tok, "(");
-    // 存储形参的链表
-    Type head = {};
-    Type *cur = &head;
-
-    while (!equal(tok, ")")) {
-      // param ("," param)*
-      if (cur != &head)
-        tok = skip(tok, ",");
-      Type *basety = declspec(&tok, tok);
-      Type *declarty = declarator(&tok, tok, basety);
-      cur->next = copytype(declarty);
-      cur = cur->next;
-    }
-    // 封装一个函数节点
-    ty =  functype(ty);
-    // 传递形参
-    ty->params = head.next;
-    *rest = tok->next;
-    return ty;
-
+    return func_params(rest, tok->next, ty);
   }
+  // "[" num "]"
+  if (equal(tok, "[")) {
+    tok = tok->next;
+    if (tok->kind != TK_NUM)
+      errorTok(tok, "expected a number");
+    int sz = tok->val;
+    *rest = skip(tok->next, "]");
+    return arrayof(ty, sz);
+  }
+  // ε
   *rest = tok;
   return ty;
 }
@@ -681,8 +694,8 @@ static void assign_lvar_offset(Function *prog)
   for (Function *fn = prog; fn; fn = fn->next) {
     int offset = 0;
     for (Obj *var = fn->locals; var; var = var->next) {
-      // 为每个变量分配8个字节
-      offset += 8;
+      // 为每个变量分配空间
+      offset += var->ty->size;
       var->offset = -offset;
     }
     fn->stacksize = align_to(offset, 16);
@@ -730,6 +743,23 @@ static void pop(const char *reg)
   depth--;
 }
 
+// 加载a0指向的值
+static void load(Type *ty) {
+  // 使用数组名访问，得到的结果就是地址，不用再加载
+  if (ty->kind == TY_ARRAY)
+    return;
+  // 访问a0地址中存储的数据，存入到a0当中
+  printf("  # 读取a0中存放的地址，得到的值存入a0\n");
+  printf("  ld a0, 0(a0)\n");
+}
+
+static void store(void)
+{
+  pop("a1");
+  printf("  # 将a0的值，写入到a1中存放的地址\n");
+  printf("  sd a0, 0(a1)\n");
+}
+
 // 代码段计数
 static int count(void)
 {
@@ -768,9 +798,7 @@ static void gen_expr(Node *nd)
     push();
     // 右部是右值，为表达式的值
     gen_expr(nd->right);
-    pop("a1");
-    printf("  # 将a0的值，写入到a1中存放的地址\n");
-    printf("  sd a0, 0(a1)\n");
+    store();
     return;
   }
   if (nd->kind == ND_FUNCALL) {
@@ -793,9 +821,7 @@ static void gen_expr(Node *nd)
   if (nd->kind == ND_VAR) {
     // 计算出变量的地址，然后存入a0
     gen_addr(nd);
-    // 访问a0地址中存储的数据，存入到a0当中
-    printf("  # 读取a0中存放的地址，得到的值存入a0\n");
-    printf("  ld a0, 0(a0)\n");
+    load(nd->ty);
     return;
   }
 
@@ -952,6 +978,7 @@ static void gen_stmt(Node *nd)
 
 
 int main(int Argc, char **Argv) {
+
   // 判断传入程序的参数是否为2个，Argv[0]为程序名称，Argv[1]为传入的第一个参数
   if (Argc != 2) {
     // 异常处理，提示参数数量不对。
@@ -963,9 +990,12 @@ int main(int Argc, char **Argv) {
     return 1;
   }
 
+  extern char *CurrentInput;
+  CurrentInput = Argv[1];
+
 
   // 词法分析
-  Token *tok = tokenize(Argv[1]);
+  Token *tok = tokenize(CurrentInput);
 
   // 语法分析
   Function *prog = parse(&tok, tok);

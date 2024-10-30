@@ -109,10 +109,12 @@ typedef enum {
   TY_INT, // int 整型
   TY_PTR, // 指针
   TY_FUNC, // 函数
+  TY_ARRAY, // 数组
 } TypeKind;
 
 typedef struct Type {
   TypeKind kind;     // 种类
+  int size;          // 大小，sizeof返回的值
   struct Type *base; // 指向的类型
 
   // 变量名？
@@ -122,6 +124,9 @@ typedef struct Type {
   Type *returnty; // 函数返回的类型
   Type *params;   // 形参
   Type *next;     // 下一类型（目前仅用于形参）
+
+  // 数组
+  int arraylen; // 数组长度，元素总个数
 } Type;
 
 // 声明一个全局变量，定义在type.c中
@@ -138,7 +143,8 @@ bool is_integer(Type *ty);
 void add_type(Node *nd);
 // 复制类型
 Type *copytype(Type *ty);
-
+// 构造数据类型，传入数组基类，元素个数
+Type *arrayof(Type *base, int len);
 
 
 void error(char *fmt, ...);

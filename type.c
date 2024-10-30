@@ -1,7 +1,7 @@
 #include "rvcc.h"
 
 // (Type) {...} 构造了一个复合字面量，相当于Type的匿名变量。
-Type *TyInt = &(Type){TY_INT};
+Type *TyInt = &(Type){TY_INT, 8};
 
 // 判断Type是否为int类型
 bool is_integer(Type *ty) { return ty->kind == TY_INT; }
@@ -12,7 +12,20 @@ Type *pointerto(Type *base)
 {
   Type *ty = calloc(1, sizeof(Type));
   ty->kind = TY_PTR;
+  ty->size = 8;
   ty->base = base;
+  return ty;
+}
+
+// 构造数据类型，传入数组基类，元素个数
+Type *arrayof(Type *base, int len)
+{
+  Type *ty = calloc(1, sizeof(Type));
+  ty->kind = TY_ARRAY;
+  // 数组大小为所有元素大小之和
+  ty->size = base->size * len;
+  ty->base = base;
+  ty->arraylen = len;
   return ty;
 }
 
@@ -58,10 +71,20 @@ void add_type(Node *nd)
   // 将节点类型设为 节点左部的类型
   case ND_ADD:
   case ND_SUB:
+    // ADD 和 SUB 都调整为 ptr +- num 的形式了，ptr永远在左边
+    // 所以要返回左边的类型。
+    nd->ty = nd->left->ty;
+    return;
   case ND_MUL:
   case ND_DIV:
   case ND_NEG:
+    nd->ty = nd->right->ty;
+    return;
+  // 将节点类型设为 节点右部的类型
+  // 右部不能是数组节点
   case ND_ASSIGN:
+    if (nd->right->ty->kind == TY_ARRAY)
+      errorTok(nd->right->tok, "not an lvalue");
     nd->ty = nd->right->ty;
     return;
   // 将节点类型设为 int
@@ -69,21 +92,28 @@ void add_type(Node *nd)
   case ND_NE:
   case ND_LT:
   case ND_LE:
-  case ND_VAR:
   case ND_NUM:
   case ND_FUNCALL:
     nd->ty = TyInt;
     return;
+  // 将节点类型设为 变量的类型
+  case ND_VAR:
+    nd->ty = nd->var->ty;
+    return;
   // 将节点类型设为指针，并指向左部的类型
   case ND_ADDR:
-    nd->ty = pointerto(nd->right->ty);
+    // 右部如果是数组，则为指向数组基类的指针
+    if (nd->right->ty->kind == TY_ARRAY)
+      nd->ty = pointerto(nd->right->ty->base);
+    else
+      nd->ty = pointerto(nd->right->ty);
     return;
   // 节点类型：如果解引用指向的是指针，则为指针指向的类型，否则为int
   case ND_DEREF:
-    if (nd->right->ty->kind == TY_PTR)
-      nd->ty = nd->right->ty->base;
-    else
-      nd->ty = TyInt;
+    // 如果不存在基类，则无法解引用
+    if (!nd->right->ty->base)
+      errorTok(nd->tok, "invalid pointer dereference");
+    nd->ty = nd->right->ty->base;
     return;
   default:
     break;

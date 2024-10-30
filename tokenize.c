@@ -1,7 +1,7 @@
 #include "rvcc.h"
 
 // 输入的字符串
-static char *CurrentInput;
+char *CurrentInput;
 
 void error(char *fmt, ...)
 {
