@@ -142,7 +142,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 // declspec = "int"
 // declarator = "*"* ident typeSuffix
-// typeSuffix = "(" funcParams | "[" num "]" | ε
+// typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 // funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
 // stmt = ("return") expr ";"
@@ -207,7 +207,7 @@ static Type *func_params(Token **rest, Token *tok, Type *ty)
   return ty;
 }
 
-// typeSuffix = "(" funcParams | "[" num "]" | ε
+// typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 static Type *type_suffix(Token **rest, Token *tok, Type *ty)
 {
   // "(" funcParams
@@ -220,7 +220,8 @@ static Type *type_suffix(Token **rest, Token *tok, Type *ty)
     if (tok->kind != TK_NUM)
       errorTok(tok, "expected a number");
     int sz = tok->val;
-    *rest = skip(tok->next, "]");
+    tok = skip(tok->next, "]");
+    ty = type_suffix(rest, tok, ty);
     return arrayof(ty, sz);
   }
   // ε
@@ -783,8 +784,7 @@ static void gen_expr(Node *nd)
   // 解引用
   if (nd->kind == ND_DEREF) {
     gen_expr(nd->right);
-    printf("  # 读取a0中存放的地址，得到的值存入a0\n");
-    printf("  ld a0, 0(a0)\n");
+    load(nd->ty);
     return;
   }
   // 取地址

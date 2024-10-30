@@ -83,9 +83,9 @@ void add_type(Node *nd)
   // 将节点类型设为 节点右部的类型
   // 右部不能是数组节点
   case ND_ASSIGN:
-    if (nd->right->ty->kind == TY_ARRAY)
-      errorTok(nd->right->tok, "not an lvalue");
-    nd->ty = nd->right->ty;
+    if (nd->left->ty->kind == TY_ARRAY)
+      errorTok(nd->left->tok, "not an lvalue");
+    nd->ty = nd->left->ty;
     return;
   // 将节点类型设为 int
   case ND_EQ:
