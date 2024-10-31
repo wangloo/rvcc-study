@@ -82,13 +82,12 @@ static Node *newadd(Node *left, Node *right, Token *tok)
     return newbinary(ND_ADD, left, right, tok);
 
   // 不能解析 ptr + ptr
-  if (left->ty->kind == TY_PTR
-      && right->ty->kind == TY_PTR)
+  if (left->ty->base && right->ty->base)
     errorTok(tok, "invalid operands");
 
   // 将 num + ptr 转换为 ptr + num
   if (left->ty->kind == TY_INT
-      && right->ty->kind == TY_PTR) {
+      && right->ty->base) {
     Node *tmp = left;
     left = right;
     right = tmp;
@@ -157,8 +156,9 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
-// unary = ("+" | "-" | "&" | "*") unary | primary
-// primary  = "(" expr ")" | num | funcall
+// unary = ("+" | "-" | "&" | "*") unary | postfix
+// postfix = primary ("[" expr "]")*
+// primary  = "(" expr ")" | ident func-args? | num | funcall
 // funcall = ident "(" (assign ("," assign)*)? ")"
 Function *function(Token **rest, Token *tok);
 static Node *compound_stmt(Token **rest, Token *tok);
@@ -172,6 +172,7 @@ static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
+static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
 // declspec = "int"
@@ -636,10 +637,30 @@ static Node *unary(Token **rest, Token *tok)
     return nd;
   }
 
-  return primary(rest, tok);
+  return postfix(rest, tok);
 }
+
+// postfix = primary ("[" expr "]")*
+static Node *postfix(Token **rest, Token *tok)
+{
+  // primary
+  Node *nd = primary(&tok, tok);
+
+  // ("[" expr "]")*
+  // x[y] 等价于 *(x+y)
+  // x[y][z] ==> *(*(x+y)+z)
+  while (equal(tok, "[")) {
+    Node *idx = expr(&tok, tok->next);
+    tok = skip(tok, "]");
+    nd = newbinary(ND_DEREF, NULL, newadd(nd, idx, tok), tok);
+  }
+  *rest = tok;
+  return nd;
+}
+
+
 // 解析括号、数字、变量
-// premary = "(" expr ")" | num | funcall
+// primary  = "(" expr ")" | ident func-args? | num | funcall
 static Node *primary(Token **rest, Token *tok)
 {
   // "(" expr ")"
