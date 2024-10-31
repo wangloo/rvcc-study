@@ -158,7 +158,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | postfix
 // postfix = primary ("[" expr "]")*
-// primary  = "(" expr ")" | ident func-args? | num | funcall
+// primary  = "(" expr ")" | ident func-args? | num | "sizeof" unary
 // funcall = ident "(" (assign ("," assign)*)? ")"
 Function *function(Token **rest, Token *tok);
 static Node *compound_stmt(Token **rest, Token *tok);
@@ -690,6 +690,14 @@ static Node *primary(Token **rest, Token *tok)
     Node *nd = newnum(tok->val, tok);
     *rest = tok->next;
     return nd;
+  }
+
+  // "sizeof" unary
+  if (equal(tok, "sizeof")) {
+    Node *nd = unary(&tok, tok->next);
+    add_type(nd);
+    *rest = tok;
+    return newnum(nd->ty->size, tok);
   }
 
   error("unexpected char '%c'\n", tok->val);
