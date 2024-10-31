@@ -82,23 +82,26 @@ typedef struct Node {
 } Node;
 
 
-// 本地变量
+// 变量 或 函数
 typedef struct Obj {
   struct Obj *next; // 指向下一个对象
   char *name;       // 变量名
   Type *ty;         // 变量类型
-  int offset;       // fp的偏移量
-} Obj;
+  bool is_local;    // 是局部或者全局 变量
 
-// 函数
-typedef struct Function {
-  struct Function *next; // 下一函数，所有函数链接在一起
-  Obj *params;           // 形参
-  Node *body;            // 函数体
-  Obj *locals;           // 本地变量
-  char *name;            // 函数名
-  int stacksize;         // 栈大小
-} Function;
+  // 局部变量
+  int offset;       // fp的偏移量
+
+  // 函数 或者 全局变量
+  bool is_function;
+
+  // 函数
+  struct Obj *params;  // 形参
+  Node *body;          // 函数体
+  struct Obj *locals;  // 本地变量
+  int stacksize;       // 栈大小
+
+} Obj;
 
 //
 // 类型系统

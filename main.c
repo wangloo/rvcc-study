@@ -1,7 +1,8 @@
 #include "rvcc.h"
 
 // 在解析时，全部的变量实例都被累加到这个列表里。
-Obj *Locals;
+Obj *Locals;  // 局部变量
+Obj *Globals; // 全局变量
 
 static Obj *findvar(Token *tok)
 {
@@ -15,14 +16,29 @@ static Obj *findvar(Token *tok)
   return NULL;
 }
 
+
+// 在链表里新增一个局部变量
 static Obj *new_local(char *name, Type *ty)
 {
-  Obj *obj = calloc(1, sizeof(Obj));
-  obj->name = name;
-  obj->next = Locals;
-  obj->ty = ty;
-  Locals = obj;
-  return obj;
+  Obj *var = calloc(1, sizeof(Obj));
+  var->name = name;
+  var->next = Locals;
+  var->ty = ty;
+  var->is_local = true;
+  Locals = var;
+  return var;
+}
+
+// 在链表里新增一个全局变量
+static Obj *new_global(char *name, Type *ty)
+{
+  Obj *var = calloc(1, sizeof(Obj));
+  var->name = name;
+  var->next = Globals;
+  var->ty = ty;
+  var->is_local = false;
+  Globals = var;
+  return var;
 }
 
 // 获取标识符
@@ -134,7 +150,8 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
-// program = functionDefinition*
+// program = (functionDefinition | globalVariable)*
+// globalVariable = TODO
 // functionDefinition = declspec declarator "{" compoundStmt
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
@@ -160,7 +177,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // postfix = primary ("[" expr "]")*
 // primary  = "(" expr ")" | ident func-args? | num | "sizeof" unary
 // funcall = ident "(" (assign ("," assign)*)? ")"
-Function *function(Token **rest, Token *tok);
+static Token *function(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
@@ -275,18 +292,17 @@ static Node *funcall(Token **rest, Token *tok)
 
 
 // 语法分析入口函数
-// program = functionDefinition*
-Function *parse(Token **rest, Token *tok)
+// program = (functionDefinition | globalVariable)*
+Obj *parse(Token **rest, Token *tok)
 {
-  Function head = {};
-  Function *cur = &head;
+  Globals = NULL;
 
   while (tok->kind != TK_EOF) {
-    cur->next = function(&tok, tok);
-    cur = cur->next;
+    Type *basety = declspec(&tok, tok);
+    tok = function(tok, basety);
   }
   *rest = tok;
-  return head.next;
+  return Globals;
 }
 
 static void create_param_lvars(Type *param)
@@ -301,20 +317,16 @@ static void create_param_lvars(Type *param)
 }
 
 // functionDefinition = declspec declarator "{" compoundStmt
-Function *function(Token **rest, Token *tok)
+static Token *function(Token *tok, Type *base)
 {
-  // declspec
-  Type *ty = declspec(&tok, tok);
-  // declarator
-  ty = declarator(&tok, tok, ty);
+  Type *ty = declarator(&tok, tok, base);
+
+  Obj *fn = new_global(get_ident(ty->name), ty);
 
   // 清空全局变量Locals
   Locals = NULL;
 
-  // 从解析完成的ty中读取ident
-  Function *fn = calloc(1, sizeof(Function));
-  // 函数名
-  fn->name = get_ident(ty->name);
+
   // 函数参数
   create_param_lvars(ty->params);
   fn->params = Locals;
@@ -323,9 +335,9 @@ Function *function(Token **rest, Token *tok)
   tok = skip(tok, "{");
 
   // 函数题存储语句的AST，locals存储变量
-  fn->body = compound_stmt(rest, tok);
+  fn->body = compound_stmt(&tok, tok);
   fn->locals = Locals;
-  return fn;
+  return tok;
 }
 
 
@@ -711,17 +723,17 @@ static int depth;
 // 用于函数参数的寄存器们
 static char *ArgReg[] = {"a0", "a1", "a2", "a3", "a4", "a5"};
 // 当前的函数
-static Function *current_fn;
+static Obj *current_fn;
 
 static int align_to(int n, int align)
 {
   // 向上对齐 (0, align] 返回 align
   return (n+align-1) & ~(align-1);
 }
-static void assign_lvar_offset(Function *prog)
+static void assign_lvar_offset(Obj *prog)
 {
   // 为每个函数计算其所用的栈空间
-  for (Function *fn = prog; fn; fn = fn->next) {
+  for (Obj *fn = prog; fn; fn = fn->next) {
     int offset = 0;
     for (Obj *var = fn->locals; var; var = var->next) {
       // 为每个变量分配空间
@@ -1027,7 +1039,7 @@ int main(int Argc, char **Argv) {
   Token *tok = tokenize(CurrentInput);
 
   // 语法分析
-  Function *prog = parse(&tok, tok);
+  Obj *prog = parse(&tok, tok);
   if (tok->kind != TK_EOF)
     error("extra token, kind: %d\n", tok->kind);
 
@@ -1035,7 +1047,7 @@ int main(int Argc, char **Argv) {
   assign_lvar_offset(prog);
 
   // 为每个函数单独生成代码
-  for (Function *fn = prog; fn; fn = fn->next) {
+  for (Obj *fn = prog; fn; fn = fn->next) {
     printf("  # 定义全局%s段\n", fn->name);
     printf("  .globl %s\n", fn->name);
     printf("\n# =====程序开始===============\n");
