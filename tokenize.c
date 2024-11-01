@@ -95,7 +95,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"int", "return", "if", "else", "for", "while", "sizeof"};
+  char *KW[] = {"int", "char", "return", "if", "else", "for", "while", "sizeof"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
       return true;

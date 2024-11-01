@@ -164,7 +164,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
-// declspec = "int"
+// declspec = "int" | "char"
 // declarator = "*"* ident typeSuffix
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 // funcParams = (param ("," param)*)? ")"
@@ -201,10 +201,16 @@ static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "int"
+// declspec = "int" | "char"
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
+  // "char"
+  if (equal(tok, "char")) {
+    *rest = skip(tok, "char");
+    return TyChar;
+  }
+  // "int"
   *rest = skip(tok, "int");
   return TyInt;
 }
@@ -438,7 +444,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (equal(tok, "int"))
+    if (equal(tok, "int") || equal(tok, "char"))
       cur->next = declaration(&tok, tok);
     // stmt
     else
@@ -839,14 +845,20 @@ static void load(Type *ty) {
     return;
   // 访问a0地址中存储的数据，存入到a0当中
   printf("  # 读取a0中存放的地址，得到的值存入a0\n");
-  printf("  ld a0, 0(a0)\n");
+  if (ty->size == 1)
+    printf("  lb a0, 0(a0)\n");
+  else
+    printf("  ld a0, 0(a0)\n");
 }
 
-static void store(void)
+static void store(Type *ty)
 {
   pop("a1");
   printf("  # 将a0的值，写入到a1中存放的地址\n");
-  printf("  sd a0, 0(a1)\n");
+  if (ty->size == 1)
+    printf("  sb a0, 0(a1)\n");
+  else
+    printf("  sd a0, 0(a1)\n");
 }
 
 // 代码段计数
@@ -886,7 +898,7 @@ static void gen_expr(Node *nd)
     push();
     // 右部是右值，为表达式的值
     gen_expr(nd->right);
-    store();
+    store(nd->ty);
     return;
   }
   if (nd->kind == ND_FUNCALL) {
@@ -1152,7 +1164,10 @@ int main(int Argc, char **Argv) {
     int I = 0;
     for (Obj *var=fn->params; var; var = var->next) {
       printf("  # 将%s寄存器的值存入%s的栈地址\n", ArgReg[I], var->name);
-      printf("  sd %s, %d(fp)\n", ArgReg[I++], var->offset);
+      if (var->ty->size == 1)
+        printf("  sb %s, %d(fp)\n", ArgReg[I++], var->offset);
+      else
+        printf("  sd %s, %d(fp)\n", ArgReg[I++], var->offset);
     }
 
 
