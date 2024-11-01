@@ -13,6 +13,14 @@ static Obj *findvar(Token *tok)
           return var;
     }
   }
+
+  // 查找Globals链表中是否存在同名变量
+  for (Obj *var = Globals; var; var = var->next) {
+    if (strlen(var->name) == tok->len &&
+        !strncmp(tok->loc, var->name, tok->len)) {
+          return var;
+        }
+  }
   return NULL;
 }
 
@@ -151,8 +159,8 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 }
 
 // program = (functionDefinition | globalVariable)*
-// globalVariable = TODO
 // functionDefinition = declspec declarator "{" compoundStmt
+// globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -178,6 +186,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // primary  = "(" expr ")" | ident func-args? | num | "sizeof" unary
 // funcall = ident "(" (assign ("," assign)*)? ")"
 static Token *function(Token *tok, Type *base);
+static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
@@ -223,6 +232,17 @@ static Type *func_params(Token **rest, Token *tok, Type *ty)
   ty->params = head.next;
   *rest = tok->next;
   return ty;
+}
+
+static bool is_function(Token *tok)
+{
+  if (equal(tok, ";"))
+    return false;
+
+  // 虚设变量，用于调用declarator
+  Type dummy = {};
+  Type *ty = declarator(&tok, tok, &dummy);
+  return ty->kind == TY_FUNC;
 }
 
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
@@ -290,7 +310,6 @@ static Node *funcall(Token **rest, Token *tok)
 }
 
 
-
 // 语法分析入口函数
 // program = (functionDefinition | globalVariable)*
 Obj *parse(Token **rest, Token *tok)
@@ -299,7 +318,15 @@ Obj *parse(Token **rest, Token *tok)
 
   while (tok->kind != TK_EOF) {
     Type *basety = declspec(&tok, tok);
-    tok = function(tok, basety);
+
+    // 函数
+    if (is_function(tok)) {
+      tok = function(tok, basety);
+      continue;
+    }
+
+    // 全局变量
+    tok = global_variable(tok, basety);
   }
   *rest = tok;
   return Globals;
@@ -322,6 +349,7 @@ static Token *function(Token *tok, Type *base)
   Type *ty = declarator(&tok, tok, base);
 
   Obj *fn = new_global(get_ident(ty->name), ty);
+  fn->is_function = true;
 
   // 清空全局变量Locals
   Locals = NULL;
@@ -337,6 +365,21 @@ static Token *function(Token *tok, Type *base)
   // 函数题存储语句的AST，locals存储变量
   fn->body = compound_stmt(&tok, tok);
   fn->locals = Locals;
+  return tok;
+}
+
+// globalVariable = declspec declarator
+static Token *global_variable(Token *tok, Type *base)
+{
+  bool first = true;
+
+  while (!consume(&tok, tok, ";")) {
+    if (!first)
+      tok = skip(tok, ",");
+    first = false;
+    Type *ty = declarator(&tok, tok, base);
+    new_global(get_ident(ty->name), ty);
+  }
   return tok;
 }
 
@@ -752,10 +795,14 @@ static void gen_expr(Node *nd);
 static void gen_addr(Node *nd)
 {
   if (nd->kind == ND_VAR) {
-    // 偏移量是相对fp的
-    printf("  # 获取变量%s的栈内地址为%d(fp)\n", nd->var->name,
+    if (nd->var->is_local) { // 偏移量是相对fp的
+      printf("  # 获取变量%s的栈内地址为%d(fp)\n", nd->var->name,
            nd->var->offset);
-    printf("  addi a0, fp, %d\n", nd->var->offset);
+      printf("  addi a0, fp, %d\n", nd->var->offset);
+    } else {
+      printf("  # 获取全局变量%s的地址\n", nd->var->name);
+      printf("  la a0, %s\n", nd->var->name);
+    }
     return;
   }
   // &* expr == expr
@@ -1016,7 +1063,20 @@ static void gen_stmt(Node *nd)
   errorTok(nd->tok, "invalid statement\n");
 }
 
+static void emit_data(Obj *prog) {
+  for (Obj *var = prog; var; var = var->next) {
+    if (var->is_function)
+      continue;
 
+    printf("  # 数据段标签\n");
+    printf("  .data\n");
+    printf("  .globl %s\n", var->name);
+    printf("  # 全局变量%s\n", var->name);
+    printf("%s:\n", var->name);
+    printf("  # 零填充%d位\n", var->ty->size);
+    printf("  .zero %d\n", var->ty->size);
+  }
+}
 
 int main(int Argc, char **Argv) {
 
@@ -1046,10 +1106,19 @@ int main(int Argc, char **Argv) {
   // 分配函数内部变量的栈空间
   assign_lvar_offset(prog);
 
+  // 生成数据
+  emit_data(prog);
+
+  // 生成代码
   // 为每个函数单独生成代码
   for (Obj *fn = prog; fn; fn = fn->next) {
+    if (!fn->is_function)
+      continue;
+
     printf("  # 定义全局%s段\n", fn->name);
     printf("  .globl %s\n", fn->name);
+    printf("  # 代码段标签\n");
+    printf("  .text\n");
     printf("\n# =====程序开始===============\n");
     printf("# %s段标签，也是程序入口段\n", fn->name);
     printf("%s:\n", fn->name);
