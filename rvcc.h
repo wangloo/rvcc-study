@@ -10,7 +10,10 @@
 #include <stdarg.h>
 #include <assert.h>
 
-
+//
+// 字符串
+//
+char *format(char *Fmt, ...);
 
 typedef enum {
   TK_IDENT, // 标记符，可以为变量名、函数名等

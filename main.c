@@ -162,10 +162,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 static char *new_unique_name(void)
 {
   static int id = 0;
-  char *buf = calloc(1,20);
-  // 讲格式化处理过后的字符串存入Buf
-  sprintf(buf, ".L..%d", id++);
-  return buf;
+  return format(".L..%d", id++);
 }
 
 // 新增匿名全局变量
