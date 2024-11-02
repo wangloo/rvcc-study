@@ -121,6 +121,26 @@ static Token *newtoken(TokenKind kind, char *start)
   return tok;
 }
 
+// 读取字符串字面量
+static Token *read_string_literal(char *start)
+{
+  char *p = start + 1;
+
+  // 识别字符串内的所有非"字符
+  for (; *p != '"'; ++p) {
+    if (*p == '\n' || *p == '\0')
+      errorAt(start, "unclosed string literal");
+  }
+
+  Token *tok = newtoken(TK_STR, start);
+  tok->len = p + 1 - start;
+  // 长度比 tok->str 多一个，存储\0
+  tok->ty = arrayof(TyChar, p - start);
+  // 拷贝双引号间的内容
+  tok->str = strndup(start + 1, p - start - 1);
+  return tok;
+}
+
 // 词法分析
 Token *tokenize(char *p)
 {
@@ -140,6 +160,14 @@ Token *tokenize(char *p)
       cur->len = p - oldp;
       continue;
     }
+    // 解析字符串字面量
+    if (*p == '"') {
+      cur->next = read_string_literal(p);
+      cur = cur->next;
+      p += cur->len;
+      continue;
+    }
+
     // 解析标记符
     // [a-zA-Z_][a-zA-Z0-9_]*
     if (isident1(*p)) {
@@ -188,6 +216,7 @@ Token *tokenize(char *p)
       p++;
       continue;
     }
+
 
 
     // 处理无法识别的字符

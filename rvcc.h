@@ -16,16 +16,21 @@ typedef enum {
   TK_IDENT, // 标记符，可以为变量名、函数名等
   TK_PUNCT, // 操作符：如+-
   TK_KEYWORD, // 关键字
+  TK_STR,     // 字符串字面量
   TK_NUM,   // 数字
   TK_EOF,   // 文件终止符，即文件的最后
 } TokenKind;
 
+typedef struct Type Type;
 typedef struct Token {
   TokenKind kind;
   struct Token *next;
   int val;
   char *loc;
   int len;
+
+  Type *ty;  // TK_STR 使用
+  char *str; // 字符串字面量，包括'\0'
 } Token;
 
 
@@ -94,6 +99,9 @@ typedef struct Obj {
 
   // 函数 或者 全局变量
   bool is_function;
+
+  // 全局变量
+  char *initdata;
 
   // 函数
   struct Obj *params;  // 形参

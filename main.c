@@ -158,6 +158,30 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
+// 新增唯一名称
+static char *new_unique_name(void)
+{
+  static int id = 0;
+  char *buf = calloc(1,20);
+  // 讲格式化处理过后的字符串存入Buf
+  sprintf(buf, ".L..%d", id++);
+  return buf;
+}
+
+// 新增匿名全局变量
+static Obj *new_anon_global(Type *ty)
+{
+  return new_global(new_unique_name(), ty);
+}
+
+// 新增字符串字面量
+static Obj *new_string_literal(char *str, Type *ty)
+{
+  Obj *var = new_anon_global(ty);
+  var->initdata = str;
+  return var;
+}
+
 // program = (functionDefinition | globalVariable)*
 // functionDefinition = declspec declarator "{" compoundStmt
 // globalVariable = declspec declarator
@@ -183,7 +207,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | postfix
 // postfix = primary ("[" expr "]")*
-// primary  = "(" expr ")" | ident func-args? | num | "sizeof" unary
+// primary  = "(" expr ")" | ident func-args? | num | str | "sizeof" unary
 // funcall = ident "(" (assign ("," assign)*)? ")"
 static Token *function(Token *tok, Type *base);
 static Token *global_variable(Token *tok, Type *base);
@@ -721,7 +745,7 @@ static Node *postfix(Token **rest, Token *tok)
 
 
 // 解析括号、数字、变量
-// primary  = "(" expr ")" | ident func-args? | num | funcall
+// primary  = "(" expr ")" | ident func-args? | num | str | funcall
 static Node *primary(Token **rest, Token *tok)
 {
   // "(" expr ")"
@@ -751,6 +775,11 @@ static Node *primary(Token **rest, Token *tok)
     Node *nd = newnum(tok->val, tok);
     *rest = tok->next;
     return nd;
+  }
+  if (tok->kind == TK_STR) {
+    Obj *var = new_string_literal(tok->str, tok->ty);
+    *rest = tok->next;
+    return newvar(var, tok);
   }
 
   // "sizeof" unary
@@ -1082,11 +1111,24 @@ static void emit_data(Obj *prog) {
 
     printf("  # 数据段标签\n");
     printf("  .data\n");
-    printf("  .globl %s\n", var->name);
-    printf("  # 全局变量%s\n", var->name);
-    printf("%s:\n", var->name);
-    printf("  # 零填充%d位\n", var->ty->size);
-    printf("  .zero %d\n", var->ty->size);
+    // 判断是否有初始值
+    if (var->initdata) {
+      printf("%s:\n", var->name);
+      // 打印出字符串的内容，包括转义字符
+      for (int i = 0; i < var->ty->size; ++i) {
+        char c = var->initdata[i];
+        if (isprint(c))
+          printf("  .byte %d\t# 字符：%c\n", c, c);
+        else
+          printf("  .byte %d\n", c);
+      }
+    } else {
+      printf("  .globl %s\n", var->name);
+      printf("  # 全局变量%s\n", var->name);
+      printf("%s:\n", var->name);
+      printf("  # 零填充%d位\n", var->ty->size);
+      printf("  .zero %d\n", var->ty->size);
+    }
   }
 }
 
