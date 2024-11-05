@@ -122,8 +122,22 @@ static Token *newtoken(TokenKind kind, char *start)
 }
 
 // 读取转义字符
-static int read_escaped_char(char *p)
+static int read_escaped_char(char **newpos, char *p)
 {
+  if ('0' <= *p && *p <= '7') {
+    // 读取一个八进制数字，不能长于三位
+    // \abc = (a*8+b)*8+c
+    int c = *p++ - '0';
+    if ('0' <= *p && *p <= '7') {
+      c = (c << 3) + (*p++ - '0');
+      if ('0' <= *p && *p <= '7')
+        c = (c << 3) + (*p++ - '0');
+    }
+    *newpos = p;
+    return c;
+  }
+
+  *newpos = p+1;
   switch (*p) {
   case 'a': // 响铃（警报）
     return '\a';
@@ -146,6 +160,7 @@ static int read_escaped_char(char *p)
     return *p;
   }
 }
+
 
 
 // 读取到字符串字面量结尾
@@ -177,8 +192,7 @@ static Token *read_string_literal(char *start)
   // 将读取后的结果写入 buf
   for (char *p = start+1; p < end;) {
     if (*p == '\\') {
-      buf[len++] = read_escaped_char(p+1);
-      p += 2;
+      buf[len++] = read_escaped_char(&p, p+1);
     } else {
       buf[len++] = *p++;
     }
