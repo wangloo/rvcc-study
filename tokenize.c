@@ -121,23 +121,75 @@ static Token *newtoken(TokenKind kind, char *start)
   return tok;
 }
 
-// 读取字符串字面量
-static Token *read_string_literal(char *start)
+// 读取转义字符
+static int read_escaped_char(char *p)
 {
-  char *p = start + 1;
+  switch (*p) {
+  case 'a': // 响铃（警报）
+    return '\a';
+  case 'b': // 退格
+    return '\b';
+  case 't': // 水平制表符, tab
+    return '\t';
+  case 'n': // 换行
+    return '\n';
+  case 'v': // 垂直制表符
+    return '\v';
+  case 'f': // 换页
+    return '\f';
+  case 'r': // 回车
+    return '\r';
+  // 属于GNU C拓展
+  case 'e': // 转义符
+    return 27;
+  default:  // 默认将原字符返回
+    return *p;
+  }
+}
+
+
+// 读取到字符串字面量结尾
+static char *string_literal_end(char *p)
+{
+  char *start = p;
 
   // 识别字符串内的所有非"字符
   for (; *p != '"'; ++p) {
     if (*p == '\n' || *p == '\0')
       errorAt(start, "unclosed string literal");
+    if (*p == '\\')
+      p++;
+  }
+  return p;
+}
+
+// 读取字符串字面量
+static Token *read_string_literal(char *start)
+{
+  // 读取到字符串字面量的右引号
+  char *end = string_literal_end(start+1);
+  // 定义一个与字符串字面量内字符数+1的buf
+  // 用来存储最大位数的字符串字面量
+  char *buf = calloc(1, end - start);
+  // 实际的字符数位，一个转义字符为1位
+  int len = 0;
+
+  // 将读取后的结果写入 buf
+  for (char *p = start+1; p < end;) {
+    if (*p == '\\') {
+      buf[len++] = read_escaped_char(p+1);
+      p += 2;
+    } else {
+      buf[len++] = *p++;
+    }
   }
 
   Token *tok = newtoken(TK_STR, start);
-  tok->len = p + 1 - start;
+  // tok->len 的作用是词法解析跳过，所以len包含两个双引号
+  tok->len = end - start + 1;
   // 长度比 tok->str 多一个，存储\0
-  tok->ty = arrayof(TyChar, p - start);
-  // 拷贝双引号间的内容
-  tok->str = strndup(start + 1, p - start - 1);
+  tok->ty = arrayof(TyChar, len + 1);
+  tok->str = buf;
   return tok;
 }
 
