@@ -121,6 +121,16 @@ static Token *newtoken(TokenKind kind, char *start)
   return tok;
 }
 
+// 返回一位十六进制转十进制的结果
+static int fromhex(char c)
+{
+  if ('0' <= c && c <= '9')
+    return c - '0';
+  if ('a' <= c && c <= 'f')
+    return c - 'a' + 10;
+  return c - 'A' + 10;
+}
+
 // 读取转义字符
 static int read_escaped_char(char **newpos, char *p)
 {
@@ -133,6 +143,21 @@ static int read_escaped_char(char **newpos, char *p)
       if ('0' <= *p && *p <= '7')
         c = (c << 3) + (*p++ - '0');
     }
+    *newpos = p;
+    return c;
+  }
+
+  if (*p == 'x') {
+    p++;
+    // 判断是否为十六进制数字
+    if (!isxdigit(*p))
+      errorAt(p, "invalid hex escape sequence");
+
+    int c = 0;
+    // 读取一位或多位十六进制数字
+    // \xWXYZ = ((W*16+X)*16)+Y)*16+Z
+    for (; isxdigit(*p); p++)
+      c = (c << 4) + fromhex(*p);
     *newpos = p;
     return c;
   }
