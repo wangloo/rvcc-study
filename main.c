@@ -838,6 +838,15 @@ static void assign_lvar_offset(Obj *prog)
   }
 }
 
+// 输出字符串并换行
+static void println(char *Fmt, ...) {
+  va_list VA;
+  va_start(VA, Fmt);
+  vprintf(Fmt, VA);
+  va_end(VA);
+  printf("\n");
+}
+
 
 
 static void gen_expr(Node *nd);
@@ -849,12 +858,12 @@ static void gen_addr(Node *nd)
 {
   if (nd->kind == ND_VAR) {
     if (nd->var->is_local) { // 偏移量是相对fp的
-      printf("  # 获取变量%s的栈内地址为%d(fp)\n", nd->var->name,
+      println("  # 获取变量%s的栈内地址为%d(fp)", nd->var->name,
            nd->var->offset);
-      printf("  addi a0, fp, %d\n", nd->var->offset);
+      println("  addi a0, fp, %d", nd->var->offset);
     } else {
-      printf("  # 获取全局变量%s的地址\n", nd->var->name);
-      printf("  la a0, %s\n", nd->var->name);
+      println("  # 获取全局变量%s的地址", nd->var->name);
+      println("  la a0, %s", nd->var->name);
     }
     return;
   }
@@ -870,18 +879,18 @@ static void gen_addr(Node *nd)
 // 不实用寄存器存储的原因是需要存储变量的个数是变化的
 static void push(void)
 {
-  printf("  # 压栈，将a0的值存入栈顶\n");
-  printf("  addi sp, sp, -8\n");
-  printf("  sd a0, 0(sp)\n");
+  println("  # 压栈，将a0的值存入栈顶");
+  println("  addi sp, sp, -8");
+  println("  sd a0, 0(sp)");
   depth++;
 }
 
 // 弹栈，弹出到reg名称的寄存器中
 static void pop(const char *reg)
 {
-  printf("  # 弹栈，将栈顶的值存入%s\n", reg);
-  printf("  ld %s, 0(sp)\n", reg);
-  printf("  addi sp, sp, 8\n");
+  println("  # 弹栈，将栈顶的值存入%s", reg);
+  println("  ld %s, 0(sp)", reg);
+  println("  addi sp, sp, 8");
   depth--;
 }
 
@@ -891,21 +900,21 @@ static void load(Type *ty) {
   if (ty->kind == TY_ARRAY)
     return;
   // 访问a0地址中存储的数据，存入到a0当中
-  printf("  # 读取a0中存放的地址，得到的值存入a0\n");
+  println("  # 读取a0中存放的地址，得到的值存入a0");
   if (ty->size == 1)
-    printf("  lb a0, 0(a0)\n");
+    println("  lb a0, 0(a0)");
   else
-    printf("  ld a0, 0(a0)\n");
+    println("  ld a0, 0(a0)");
 }
 
 static void store(Type *ty)
 {
   pop("a1");
-  printf("  # 将a0的值，写入到a1中存放的地址\n");
+  println("  # 将a0的值，写入到a1中存放的地址");
   if (ty->size == 1)
-    printf("  sb a0, 0(a1)\n");
+    println("  sb a0, 0(a1)");
   else
-    printf("  sd a0, 0(a1)\n");
+    println("  sd a0, 0(a1)");
 }
 
 // 代码段计数
@@ -918,14 +927,14 @@ static int count(void)
 static void gen_expr(Node *nd)
 {
   if (nd->kind == ND_NUM) {
-    printf("  # 将%d加载到a0中\n", nd->val);
-    printf("  li a0, %d\n", nd->val);
+    println("  # 将%d加载到a0中", nd->val);
+    println("  li a0, %d", nd->val);
     return;
   }
   if (nd->kind == ND_NEG) {
     gen_expr(nd->right);
-    printf("  # 对a0值进行取反\n");
-    printf("  neg a0, a0\n");
+    println("  # 对a0值进行取反");
+    println("  neg a0, a0");
     return;
   }
   // 解引用
@@ -1093,15 +1102,15 @@ static void gen_stmt(Node *nd)
     printf("  # 跳转到分支%d的.L.end.%d段\n", c, c);
     printf("  j .L.end.%d\n", c);
     // else代码块，else可能为空，故输出标签
-    printf("\n# Else语句%d\n", c);
-    printf("# 分支%d的.L.else.%d段标签\n", c, c);
-    printf(".L.else.%d:\n", c);
+    println("\n# Else语句%d", c);
+    println("# 分支%d的.L.else.%d段标签", c, c);
+    println(".L.else.%d:", c);
     // 生成不符合条件后的语句
     if (nd->els)
       gen_stmt(nd->els);
     // 结束if语句，继续执行后面的语句
-    printf("\n# 分支%d的.L.end.%d段标签\n", c, c);
-    printf(".L.end.%d:\n", c);
+    println("\n# 分支%d的.L.end.%d段标签", c, c);
+    println(".L.end.%d:", c);
 
     return;
   }
@@ -1112,12 +1121,12 @@ static void gen_stmt(Node *nd)
     return;
   }
   if (nd->kind == ND_RETURN) {
-    printf("# 返回语句\n");
+    println("# 返回语句");
     gen_expr(nd->right);
     // 无条件跳转语句，跳转到.L.return段
     // j offset是 jal x0, offset的别名指令
-    printf("  # 跳转到.L.return.%s段\n", current_fn->name);
-    printf("  j .L.return.%s\n", current_fn->name);
+    println("  # 跳转到.L.return.%s段", current_fn->name);
+    println("  j .L.return.%s", current_fn->name);
     return;
   }
 
@@ -1133,25 +1142,25 @@ static void emit_data(Obj *prog) {
     if (var->is_function)
       continue;
 
-    printf("  # 数据段标签\n");
-    printf("  .data\n");
+    println("  # 数据段标签");
+    println("  .data");
     // 判断是否有初始值
     if (var->initdata) {
-      printf("%s:\n", var->name);
+      println("%s:", var->name);
       // 打印出字符串的内容，包括转义字符
       for (int i = 0; i < var->ty->size; ++i) {
         char c = var->initdata[i];
         if (isprint(c))
-          printf("  .byte %d\t# 字符：%c\n", c, c);
+          println("  .byte %d\t# 字符：%c", c, c);
         else
-          printf("  .byte %d\n", c);
+          println("  .byte %d", c);
       }
     } else {
-      printf("  .globl %s\n", var->name);
-      printf("  # 全局变量%s\n", var->name);
-      printf("%s:\n", var->name);
-      printf("  # 零填充%d位\n", var->ty->size);
-      printf("  .zero %d\n", var->ty->size);
+      println("  .globl %s", var->name);
+      println("  # 全局变量%s", var->name);
+      println("%s:", var->name);
+      println("  # 零填充%d位", var->ty->size);
+      println("  .zero %d", var->ty->size);
     }
   }
 }
@@ -1191,13 +1200,13 @@ int main(int Argc, char **Argv) {
     if (!fn->is_function)
       continue;
 
-    printf("  # 定义全局%s段\n", fn->name);
-    printf("  .globl %s\n", fn->name);
-    printf("  # 代码段标签\n");
-    printf("  .text\n");
-    printf("\n# =====程序开始===============\n");
-    printf("# %s段标签，也是程序入口段\n", fn->name);
-    printf("%s:\n", fn->name);
+    println("  # 定义全局%s段", fn->name);
+    println("  .globl %s", fn->name);
+    println("  # 代码段标签");
+    println("  .text");
+    println("\n# =====程序开始===============");
+    println("# %s段标签，也是程序入口段", fn->name);
+    println("%s:", fn->name);
     current_fn = fn;
     // 栈布局
     //-------------------------------// sp
@@ -1212,53 +1221,53 @@ int main(int Argc, char **Argv) {
 
     // Prologue, 前言
     // 将ra寄存器压栈，保存ra的值
-    printf("  # 将ra寄存器压栈,保存ra的值\n");
-    printf("  addi sp, sp, -16\n");
-    printf("  sd ra, 8(sp)\n");
+    println("  # 将ra寄存器压栈,保存ra的值");
+    println("  addi sp, sp, -16");
+    println("  sd ra, 8(sp)");
     // 将fp压入栈中，保存fp的值
-    printf("  # 将fp压栈，fp属于“被调用者保存”的寄存器，需要恢复原值\n");
-    printf("  sd fp, 0(sp)\n");
+    println("  # 将fp压栈，fp属于“被调用者保存”的寄存器，需要恢复原值");
+    println("  sd fp, 0(sp)");
     // 将sp写入fp
-    printf("  # 将sp的值写入fp\n");
-    printf("  mv fp, sp\n");
+    println("  # 将sp的值写入fp");
+    println("  mv fp, sp");
     // sp偏移量为实际占用的栈大小
-    printf("  # sp腾出StackSize大小的栈空间\n");
-    printf("  addi sp, sp, -%d\n", fn->stacksize);
+    println("  # sp腾出StackSize大小的栈空间");
+    println("  addi sp, sp, -%d", fn->stacksize);
 
     int I = 0;
     for (Obj *var=fn->params; var; var = var->next) {
-      printf("  # 将%s寄存器的值存入%s的栈地址\n", ArgReg[I], var->name);
+      println("  # 将%s寄存器的值存入%s的栈地址", ArgReg[I], var->name);
       if (var->ty->size == 1)
-        printf("  sb %s, %d(fp)\n", ArgReg[I++], var->offset);
+        println("  sb %s, %d(fp)", ArgReg[I++], var->offset);
       else
-        printf("  sd %s, %d(fp)\n", ArgReg[I++], var->offset);
+        println("  sd %s, %d(fp)", ArgReg[I++], var->offset);
     }
 
 
     // 使用语法树，生成表达式
-    printf("\n# =====%s主体===============\n", fn->name);
+    println("\n# =====%s主体===============", fn->name);
     gen_stmt(fn->body);
     assert(depth == 0);
 
     // Epilogue, 后语
     // 输出return段标签
-    printf("\n# =====%s结束===============\n", fn->name);
-    printf("# return段标签\n");
-    printf(".L.return.%s:\n", fn->name);
+    println("\n# =====%s结束===============", fn->name);
+    println("# return段标签");
+    println(".L.return.%s:", fn->name);
     // 将fp的值改写回sp
-    printf("  # 将fp的值写回sp\n");
-    printf("  mv sp, fp\n");
+    println("  # 将fp的值写回sp");
+    println("  mv sp, fp");
     // 将最早fp保存的值弹栈，恢复fp
-    printf("  # 将最早fp保存的值弹栈，恢复fp和sp\n");
-    printf("  ld fp, 0(sp)\n");
+    println("  # 将最早fp保存的值弹栈，恢复fp和sp");
+    println("  ld fp, 0(sp)");
     // 将ra寄存器弹栈,恢复ra的值
-    printf("  # 将ra寄存器弹栈,恢复ra的值\n");
-    printf("  ld ra, 8(sp)\n");
-    printf("  addi sp, sp, 16\n");
+    println("  # 将ra寄存器弹栈,恢复ra的值");
+    println("  ld ra, 8(sp)");
+    println("  addi sp, sp, 16");
 
     // ret为jalr x0, x1, 0别名指令，用于返回子程序
-    printf("  # 返回a0值给系统调用\n");
-    printf("  ret\n");
+    println("  # 返回a0值给系统调用");
+    println("  ret");
   }
   return 0;
 }
