@@ -1,5 +1,7 @@
 #include "rvcc.h"
 
+// 输入的文件名
+char *CurrentFilename;
 // 输入的字符串
 char *CurrentInput;
 
@@ -15,13 +17,38 @@ void error(char *fmt, ...)
 }
 
 // 输出错误出现的位置，并退出
+// foo.c:10: x = y + 1;
+//               ^ <错误信息>
 static void verrorAt(char *Loc, char *Fmt, va_list VA) {
-  // 先输出源信息
-  fprintf(stderr, "%s\n", CurrentInput);
 
-  // 输出出错信息
-  // 计算出错的位置，Loc是出错位置的指针，CurrentInput是当前输入的首地址
-  int Pos = Loc - CurrentInput;
+  // 查找包含loc的行
+  char *line = Loc;
+  // line 递减到当前行的最开始位置
+  // line<CurrentInput，判断是否读取到文件最开始的位置
+  // line[-1] != '\n', line字符串前一个字符是否为换行符（上一行末尾）
+  while (CurrentInput < line && line[-1] != '\n')
+    line--;
+
+  // end 递增到行尾的换行符
+  char *end = Loc;
+  while (*end != '\n')
+    end++;
+
+  // 获取行号
+  int lineno = 1;
+  for (char *p = CurrentInput; p < line; p++) {
+    // 遇到换行符则行号+1
+    if (*p == '\n')
+      lineno++;
+  }
+  // 输出 文件名:错误行
+  // Indent记录输出了多少个字符
+  int Indent = fprintf(stderr, "%s:%d: ", CurrentFilename, lineno);
+  // 输出Line的行内所有字符（不含换行符）
+  fprintf(stderr, "%.*s\n", (int)(end - line), line);
+  // 计算错误信息位置，在当前行内的偏移量+前面输出了多少个字符
+  int Pos = Loc - line + Indent;
+
   // 将字符串补齐为Pos位，因为是空字符串，所以填充Pos个空格。
   fprintf(stderr, "%*s", Pos, "");
   fprintf(stderr, "^ ");
@@ -232,12 +259,59 @@ static Token *read_string_literal(char *start)
   return tok;
 }
 
+static char *readfile(char *path)
+{
+  FILE *fp;
+
+  if (strcmp(path, "-") == 0) {
+    // 如果文件名是"-", 那么就从输入中读取
+    fp = stdin;
+  } else {
+    fp = fopen(path, "r");
+    if (!fp)
+      // errno 为系统最后一次的错误代码
+      // stderror以字符串的形式输出错误代码
+      error("cannot open %s: %s", path, strerror(errno));
+  }
+
+  // 要返回的字符串
+  char *buf;
+  size_t buflen;
+  FILE *out = open_memstream(&buf, &buflen);
+
+  // 读取整个文件
+  while (true) {
+    char buf2[4096];
+    // fread 从文件流中读取数据到数组中
+    // 数组指针buf2，数组元素大小1，数组元素个数4096，文件流指针
+    int n = fread(buf2, 1, sizeof(buf2), fp);
+    if (n == 0)
+      break;
+    // 数组指针buf2，数组元素大小1，实际元素个数N，文件流指针
+    fwrite(buf2, 1, n, out);
+  }
+  if (fp != stdin)
+    fclose(fp);
+
+  // 刷新流的输出缓冲区，确保内容都被输出到流中
+  fflush(out);
+  // 确保最后一行以'\n'结尾
+  if (buflen == 0 || buf[buflen - 1] != '\n')
+    // 将字符输出到流中
+    fputc('\n', out);
+  fputc('\0', out);
+  fclose(out);
+  return buf;
+}
+
 // 词法分析
-Token *tokenize(char *p)
+Token *tokenize(char *filename, char *p)
 {
   Token head = {};
   Token *cur = &head;
 
+  CurrentFilename = filename;
+  CurrentInput = p;
   while (*p) {
     if (isspace(*p)) {
       p++;
@@ -320,4 +394,10 @@ Token *tokenize(char *p)
   // 将所有关键字的终结符，都标记为KEYWORD
   convert_keywords(head.next);
   return head.next;
+}
+
+// 对文件进行词法分析
+Token *tokenize_file(char *path)
+{
+  return tokenize(path, readfile(path));
 }

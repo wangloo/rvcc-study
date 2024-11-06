@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <assert.h>
 
 //
@@ -172,5 +173,5 @@ bool equal(Token *Tok, char *Str);
 Token *skip(Token *Tok, char *Str);
 bool consume(Token **Rest, Token *Tok, char *Str);
 // 词法分析
-Token *tokenize(char *Input);
+Token *tokenize_file(char *path);
 void add_type(Node *nd);

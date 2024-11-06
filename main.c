@@ -1169,12 +1169,10 @@ int main(int Argc, char **Argv) {
     return 1;
   }
 
-  extern char *CurrentInput;
-  CurrentInput = Argv[1];
 
 
   // 词法分析
-  Token *tok = tokenize(CurrentInput);
+  Token *tok = tokenize_file(Argv[1]);
 
   // 语法分析
   Obj *prog = parse(&tok, tok);
