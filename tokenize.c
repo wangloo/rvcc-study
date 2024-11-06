@@ -106,6 +106,10 @@ bool consume(Token **rest, Token *tok, char *str)
   return false;
 }
 
+static bool starts_with(char *str, char *substr) {
+  return 0 == strncmp(str, substr, strlen(substr));
+}
+
 // 判断标记符首字母规则
 // [a-zA-Z_]
 static bool isident1(char c)
@@ -313,6 +317,23 @@ Token *tokenize(char *filename, char *p)
   CurrentFilename = filename;
   CurrentInput = p;
   while (*p) {
+    // 跳过行注释
+    if (starts_with(p, "//")) {
+      p += 2;
+      while (*p != '\n')
+        p++;
+      continue;
+    }
+
+    // 跳过块注释
+    if (starts_with(p, "/*")) {
+      char *q = strstr(p+2, "*/");
+      if (!q)
+        errorAt(p, "unclosing block comment");
+      p = q + 2;
+      continue;
+    }
+
     if (isspace(*p)) {
       p++;
       continue;
@@ -325,6 +346,7 @@ Token *tokenize(char *filename, char *p)
       cur->len = p - oldp;
       continue;
     }
+
     // 解析字符串字面量
     if (*p == '"') {
       cur->next = read_string_literal(p);
