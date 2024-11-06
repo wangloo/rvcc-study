@@ -48,6 +48,7 @@ typedef enum {
   ND_NE, // !=
   ND_EQ, // ==
   ND_EXPR_STMT, // 表达式语句
+  ND_STMT_EXPR, // 语句表达式
   ND_ASSIGN, // 赋值
   ND_ADDR,      // 取地址 &
   ND_DEREF,     // 解引用 *
@@ -74,7 +75,7 @@ typedef struct Node {
   struct Node *left;
   struct Node *right;
   Obj *var;          // 存储ND_VAL种类的变量
-  struct Node *body; // 代码块
+  struct Node *body; // 代码块 或 语句表达式
   int val;           // 存储ND_NUM种类的值
 
   // 函数调用

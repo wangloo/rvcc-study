@@ -116,6 +116,19 @@ void add_type(Node *nd)
       errorTok(nd->tok, "invalid pointer dereference");
     nd->ty = nd->right->ty->base;
     return;
+  // 节点类型为 最后的表达式语句的类型
+  case ND_STMT_EXPR:
+    if (nd->body) {
+      Node *stmt = nd->body;
+      while (stmt->next)
+        stmt = stmt->next;
+      if (stmt->kind == ND_EXPR_STMT) {
+        nd->ty = stmt->right->ty;
+        return;
+      }
+    }
+    errorTok(nd->tok, "statement expression returning void is not support");
+    return;
   default:
     break;
   }

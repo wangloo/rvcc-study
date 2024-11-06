@@ -204,7 +204,12 @@ static Obj *new_string_literal(char *str, Type *ty)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | postfix
 // postfix = primary ("[" expr "]")*
-// primary  = "(" expr ")" | ident func-args? | num | str | "sizeof" unary
+// primary = "(" "{" stmt+ "}" ")"
+//          | "(" expr ")"
+//          | ident func-args?
+//          | num
+//          | str
+//          | "sizeof" unary
 // funcall = ident "(" (assign ("," assign)*)? ")"
 static Token *function(Token *tok, Type *base);
 static Token *global_variable(Token *tok, Type *base);
@@ -742,9 +747,23 @@ static Node *postfix(Token **rest, Token *tok)
 
 
 // 解析括号、数字、变量
-// primary  = "(" expr ")" | ident func-args? | num | str | funcall
+// primary = "(" "{" stmt+ "}" ")"
+//          | "(" expr ")"
+//          | ident func-args?
+//          | num
+//          | str
+//          | "sizeof" unary
 static Node *primary(Token **rest, Token *tok)
 {
+  // "(" "{" stmt+ "}" ")"
+  if (equal(tok, "(") && equal(tok->next, "{")) {
+    // This is a GNU statement expression.
+    Node *nd = newnode(ND_STMT_EXPR, tok);
+    nd->body = compound_stmt(&tok, tok->next->next)->body;
+    *rest = skip(tok, ")");
+    return nd;
+  }
+
   // "(" expr ")"
   if (equal(tok, "(")) {
     Node *nd = expr(&tok, tok->next);
@@ -822,6 +841,8 @@ static void assign_lvar_offset(Obj *prog)
 
 
 static void gen_expr(Node *nd);
+static void gen_stmt(Node *nd);
+
 // 计算给定节点的绝对地址
 // 如果报错，说明节点不在栈中
 static void gen_addr(Node *nd)
@@ -925,6 +946,12 @@ static void gen_expr(Node *nd)
     // 右部是右值，为表达式的值
     gen_expr(nd->right);
     store(nd->ty);
+    return;
+  }
+  // 语句表达式
+  if (nd->kind == ND_STMT_EXPR) {
+    for (Node *n = nd->body; n; n = n->next)
+      gen_stmt(n);
     return;
   }
   if (nd->kind == ND_FUNCALL) {
