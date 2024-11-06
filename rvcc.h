@@ -16,6 +16,7 @@
 //
 char *format(char *Fmt, ...);
 
+
 typedef enum {
   TK_IDENT, // 标记符，可以为变量名、函数名等
   TK_PUNCT, // 操作符：如+-

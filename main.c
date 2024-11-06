@@ -1,27 +1,60 @@
 #include "rvcc.h"
 
+// 局部和全局变量的域
+typedef struct VarScope VarScope;
+struct VarScope {
+  VarScope *next; // 下一个变量域
+  char *name;     // 变量域名称
+  Obj *var;       // 对应的变量
+};
+
+// 表示一个块域
+typedef struct Scope Scope;
+struct Scope {
+  Scope *next;    // 指向上一级的域
+  VarScope *vars; // 指向当前域内的变量
+};
 // 在解析时，全部的变量实例都被累加到这个列表里。
 Obj *Locals;  // 局部变量
 Obj *Globals; // 全局变量
 
+// 所有域的链表
+static Scope *Scp = &(Scope){};
+
 static Obj *findvar(Token *tok)
 {
-  // 查找Locals变量中是否存在同名变量
-  for (Obj *var = Locals; var; var = var->next) {
-    if (strlen(var->name) == tok->len &&
-        !strncmp(tok->loc, var->name, tok->len)) {
-          return var;
-    }
-  }
-
-  // 查找Globals链表中是否存在同名变量
-  for (Obj *var = Globals; var; var = var->next) {
-    if (strlen(var->name) == tok->len &&
-        !strncmp(tok->loc, var->name, tok->len)) {
-          return var;
-        }
-  }
+  // 此处越先匹配的域，越深层
+  for (Scope *s = Scp; s; s = s->next)
+    // 遍历域内的所有变量
+    for (VarScope *s2 = s->vars; s2; s2 = s2->next)
+      if (equal(tok, s2->name))
+        return s2->var;
   return NULL;
+}
+
+// 进入域
+static void enter_scope(void) {
+  Scope *s = calloc(1, sizeof(Scope));
+  // 后来的在链表头部
+  s->next = Scp;
+  Scp = s;
+}
+// 结束当前域
+static void leave_scope(void) {
+  Scp = Scp->next;
+  // 没释放资源吗?
+}
+
+
+// 将变量存入当前的域中
+static VarScope *push_scope(char *name, Obj *var) {
+  VarScope *s = calloc(1, sizeof(VarScope));
+  s->name = name;
+  s->var = var;
+  // 后来的在链表头部；
+  s->next = Scp->vars;
+  Scp->vars = s;
+  return s;
 }
 
 
@@ -34,6 +67,7 @@ static Obj *new_local(char *name, Type *ty)
   var->ty = ty;
   var->is_local = true;
   Locals = var;
+  push_scope(name, var);
   return var;
 }
 
@@ -46,6 +80,7 @@ static Obj *new_global(char *name, Type *ty)
   var->ty = ty;
   var->is_local = false;
   Globals = var;
+  push_scope(name, var);
   return var;
 }
 
@@ -385,6 +420,8 @@ static Token *function(Token *tok, Type *base)
 
   // 清空全局变量Locals
   Locals = NULL;
+  // 进入新的域
+  enter_scope();
 
 
   // 函数参数
@@ -397,6 +434,8 @@ static Token *function(Token *tok, Type *base)
   // 函数题存储语句的AST，locals存储变量
   fn->body = compound_stmt(&tok, tok);
   fn->locals = Locals;
+  // 结束当前域
+  leave_scope();
   return tok;
 }
 
@@ -467,6 +506,9 @@ static Node *compound_stmt(Token **rest, Token *tok)
   Node head = {};
   Node *cur = &head;
 
+  // 进入新的域
+  enter_scope();
+
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
@@ -479,6 +521,9 @@ static Node *compound_stmt(Token **rest, Token *tok)
     // 构造完AST后，为节点添加类型信息
     add_type(cur);
   }
+
+  // 结束当前的域
+  leave_scope();
 
   Node *nd = newnode(ND_BLOCK, tok);
   nd->body = head.next;
