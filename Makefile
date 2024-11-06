@@ -4,13 +4,14 @@ CFLAGS=-std=c11 -g -fno-common
 CC=gcc
 
 # rvcc标签，表示如何构建最终的二进制文件，依赖于main.o文件
-rvcc: main.o tokenize.o type.o string.o
+rvcc: main.o tokenize.o type.o string.o codegen.o
 # 将多个*.o文件编译为rvcc
-	$(CC) -o rvcc $(CFLAGS) main.o tokenize.o type.o string.o
+	$(CC) -o rvcc $(CFLAGS) main.o tokenize.o type.o string.o codegen.o
 
 # 测试标签，运行测试脚本
 test: rvcc
 	./test.sh
+	./test-driver.sh
 
 # 清理标签，清理所有非源代码文件
 clean:

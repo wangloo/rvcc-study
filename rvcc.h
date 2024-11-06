@@ -174,4 +174,4 @@ Token *skip(Token *Tok, char *Str);
 bool consume(Token **Rest, Token *Tok, char *Str);
 // 词法分析
 Token *tokenize_file(char *path);
-void add_type(Node *nd);
+void codegen(Obj *prog, FILE *out);
