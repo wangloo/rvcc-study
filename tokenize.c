@@ -19,7 +19,7 @@ void error(char *fmt, ...)
 // 输出错误出现的位置，并退出
 // foo.c:10: x = y + 1;
 //               ^ <错误信息>
-static void verrorAt(char *Loc, char *Fmt, va_list VA) {
+static void verrorAt(int lineno, char *Loc, char *Fmt, va_list VA) {
 
   // 查找包含loc的行
   char *line = Loc;
@@ -34,13 +34,6 @@ static void verrorAt(char *Loc, char *Fmt, va_list VA) {
   while (*end != '\n')
     end++;
 
-  // 获取行号
-  int lineno = 1;
-  for (char *p = CurrentInput; p < line; p++) {
-    // 遇到换行符则行号+1
-    if (*p == '\n')
-      lineno++;
-  }
   // 输出 文件名:错误行
   // Indent记录输出了多少个字符
   int Indent = fprintf(stderr, "%s:%d: ", CurrentFilename, lineno);
@@ -59,9 +52,17 @@ static void verrorAt(char *Loc, char *Fmt, va_list VA) {
 
 // 字符解析出错
 void errorAt(char *Loc, char *Fmt, ...) {
+  // 获取行号
+  int lineno = 1;
+  for (char *p = CurrentInput; p < Loc; p++) {
+    // 遇到换行符则行号+1
+    if (*p == '\n')
+      lineno++;
+  }
+
   va_list VA;
   va_start(VA, Fmt);
-  verrorAt(Loc, Fmt, VA);
+  verrorAt(lineno, Loc, Fmt, VA);
   exit(1);
 }
 
@@ -69,7 +70,7 @@ void errorAt(char *Loc, char *Fmt, ...) {
 void errorTok(Token *Tok, char *Fmt, ...) {
   va_list VA;
   va_start(VA, Fmt);
-  verrorAt(Tok->loc, Fmt, VA);
+  verrorAt(Tok->lineno, Tok->loc, Fmt, VA);
   exit(1);
 }
 
@@ -141,6 +142,20 @@ static void convert_keywords(Token *tok)
       t->kind = TK_KEYWORD;
     }
   }
+}
+
+static void add_linenumbers(Token *tok) {
+  char *p = CurrentInput;
+  int n = 1;
+
+  do {
+    if (p == tok->loc) {
+      tok->lineno = n;
+      tok = tok->next;
+    }
+    if (*p == '\n')
+      n++;
+  } while (*p++);
 }
 
 
@@ -413,6 +428,8 @@ Token *tokenize(char *filename, char *p)
   // 解析结束，增加一个EOF，表示终止符
   cur->next = newtoken(TK_EOF, p);
 
+  // 为所有的Token添加行号
+  add_linenumbers(head.next);
   // 将所有关键字的终结符，都标记为KEYWORD
   convert_keywords(head.next);
   return head.next;

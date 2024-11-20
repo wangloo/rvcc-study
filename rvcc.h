@@ -36,6 +36,8 @@ typedef struct Token {
 
   Type *ty;  // TK_STR 使用
   char *str; // 字符串字面量，包括'\0'
+
+  int lineno; // 行号
 } Token;
 
 
