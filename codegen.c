@@ -62,6 +62,12 @@ static void gen_addr(Node *nd)
     gen_expr(nd->right);
     return;
   }
+  // 逗号
+  if (nd->kind == ND_COMMA) {
+    gen_expr(nd->left);
+    gen_addr(nd->right);
+    return;
+  }
   errorTok(nd->tok, "not an lvalue");
 }
 
@@ -116,6 +122,8 @@ static int count(void)
 
 static void gen_expr(Node *nd)
 {
+  //.loc 文件编号 行号
+  println(" .loc 1 %d", nd->tok->lineno);
   if (nd->kind == ND_NUM) {
     println("  # 将%d加载到a0中", nd->val);
     println("  li a0, %d", nd->val);
@@ -131,6 +139,12 @@ static void gen_expr(Node *nd)
   if (nd->kind == ND_DEREF) {
     gen_expr(nd->right);
     load(nd->ty);
+    return;
+  }
+  // 逗号
+  if (nd->kind == ND_COMMA) {
+    gen_expr(nd->left);
+    gen_expr(nd->right);
     return;
   }
   // 取地址
@@ -240,6 +254,9 @@ static void gen_expr(Node *nd)
 
 static void gen_stmt(Node *nd)
 {
+  // .loc 文件编号 行号
+  println(" .loc 1 %d", nd->tok->lineno);
+
   if (nd->kind == ND_FOR) {
     // 代码段技术
     int c = count();

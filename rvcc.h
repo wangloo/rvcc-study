@@ -54,6 +54,7 @@ typedef enum {
   ND_EXPR_STMT, // 表达式语句
   ND_STMT_EXPR, // 语句表达式
   ND_ASSIGN, // 赋值
+  ND_COMMA,  // 逗号
   ND_ADDR,      // 取地址 &
   ND_DEREF,     // 解引用 *
   ND_RETURN, // 返回

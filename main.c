@@ -219,7 +219,7 @@ static Obj *new_string_literal(char *str, Type *ty)
 // globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
-//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+//        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
 // declspec = "int" | "char"
 // declarator = "*"* ident typeSuffix
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
@@ -232,7 +232,7 @@ static Obj *new_string_literal(char *str, Type *ty)
 //        | expr? ";"
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
-// expr = assign
+// expr = assign ("," expr)?
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
@@ -456,7 +456,7 @@ static Token *global_variable(Token *tok, Type *base)
 
 
 // declaration =
-//        declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+//        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
 static Node *declaration(Token **rest, Token *tok)
 {
   // declspec
@@ -486,7 +486,7 @@ static Node *declaration(Token **rest, Token *tok)
     Node *left = newvar(var, ty->name);
     // 解析递归赋值语句
     // tok->next 跳过 "="
-    Node *right = expr(&tok, tok->next);
+    Node *right = assign(&tok, tok->next);
     Node *node = newbinary(ND_ASSIGN, left, right, tok);
     // 存放在表达式语句中
     cur->next = newbinary(ND_EXPR_STMT, NULL, node, tok);
@@ -629,9 +629,17 @@ static Node *expr_stmt(Token **rest, Token *tok)
   return nd;
 }
 
-// expr = assign
-static Node *expr(Token **rest, Token *tok)
-{ return assign(rest, tok); }
+// expr = assign ("," expr)?
+static Node *expr(Token **rest, Token *tok) {
+  Node *nd = assign(&tok, tok);
+
+  // ("," expr)?
+  if (equal(tok, ","))
+    return newbinary(ND_COMMA, nd, expr(rest, tok->next), tok);
+
+  *rest = tok;
+  return nd;
+}
 
 // 解析赋值
 // assign = equality ("=" assign)?
@@ -933,6 +941,8 @@ int main(int Argc, char **Argv) {
 
   // 生成代码
   FILE *out = openfile(OptO);
+  // .fiule 文件编号 文件名
+  fprintf(out, ".file 1\"%s\"\n", InputPath);
   codegen(prog, out);
   return 0;
 }

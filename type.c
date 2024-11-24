@@ -88,6 +88,10 @@ void add_type(Node *nd)
       errorTok(nd->left->tok, "not an lvalue");
     nd->ty = nd->left->ty;
     return;
+  // 将节点类型设为 右部的类型
+  case ND_COMMA:
+    nd->ty = nd->right->ty;
+    return;
   // 将节点类型设为 int
   case ND_EQ:
   case ND_NE:
