@@ -68,6 +68,14 @@ static void gen_addr(Node *nd)
     gen_addr(nd->right);
     return;
   }
+  // 结构体成员
+  if (nd->kind == ND_MEMBER) {
+    gen_addr(nd->right);
+    println("  # 计算成员变量的地址偏移量");
+    println("  li t0, %d", nd->mem->offset);
+    println("  add a0, a0, t0");
+    return;
+  }
   errorTok(nd->tok, "not an lvalue");
 }
 
@@ -184,7 +192,8 @@ static void gen_expr(Node *nd)
     println("  call %s", nd->func_name);
     return;
   }
-  if (nd->kind == ND_VAR) {
+  if (nd->kind == ND_VAR ||
+      nd->kind == ND_MEMBER) {
     // 计算出变量的地址，然后存入a0
     gen_addr(nd);
     load(nd->ty);

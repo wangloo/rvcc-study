@@ -55,6 +55,7 @@ typedef enum {
   ND_STMT_EXPR, // 语句表达式
   ND_ASSIGN, // 赋值
   ND_COMMA,  // 逗号
+  ND_MEMBER, // 结构体成员访问
   ND_ADDR,      // 取地址 &
   ND_DEREF,     // 解引用 *
   ND_RETURN, // 返回
@@ -68,6 +69,7 @@ typedef enum {
 
 typedef struct Obj Obj;
 typedef struct Type Type;
+typedef struct Member Member;
 
 // AST中二叉树节点
 // AST: 语法树
@@ -82,6 +84,9 @@ typedef struct Node {
   Obj *var;          // 存储ND_VAL种类的变量
   struct Node *body; // 代码块 或 语句表达式
   int val;           // 存储ND_NUM种类的值
+
+  // 结构体成员访问
+  Member *mem;
 
   // 函数调用
   char *func_name;    // 函数名
@@ -131,6 +136,7 @@ typedef enum {
   TY_PTR, // 指针
   TY_FUNC, // 函数
   TY_ARRAY, // 数组
+  TY_STRUCT, // 结构体
 } TypeKind;
 
 typedef struct Type {
@@ -141,6 +147,9 @@ typedef struct Type {
   // 变量名？
   Token *name;
 
+  // 结构体
+  Member *mems;
+
   // 函数类型
   Type *returnty; // 函数返回的类型
   Type *params;   // 形参
@@ -149,6 +158,13 @@ typedef struct Type {
   // 数组
   int arraylen; // 数组长度，元素总个数
 } Type;
+
+typedef struct Member {
+	Member *next; // 下个成员
+	Type *ty;     // 成员的类型
+	Token *name;  // 名称
+	int offset;   // 偏移量
+} Member;
 
 // 声明全局变量，定义在type.c中
 extern Type *TyChar;

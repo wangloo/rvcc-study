@@ -8,6 +8,9 @@ project( rvcc C )
 add_executable( rvcc
   main.c
   tokenize.c
+  string.c
+  type.c
+  codegen.c
 )
 
 # 编译参数

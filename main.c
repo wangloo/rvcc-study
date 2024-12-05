@@ -214,13 +214,16 @@ static Obj *new_string_literal(char *str, Type *ty)
   return var;
 }
 
+static Node *struct_ref(Node *left, Token *tok);
+static Type *struct_decl(Token **rest, Token *tok);
+
 // program = (functionDefinition | globalVariable)*
 // functionDefinition = declspec declarator "{" compoundStmt
 // globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = "int" | "char"
+// declspec = "int" | "char" | structDecl
 // declarator = "*"* ident typeSuffix
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 // funcParams = (param ("," param)*)? ")"
@@ -238,7 +241,7 @@ static Obj *new_string_literal(char *str, Type *ty)
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | postfix
-// postfix = primary ("[" expr "]")*
+// postfix = primary ("[" expr "]" | "," ident)*
 // primary = "(" "{" stmt+ "}" ")"
 //          | "(" expr ")"
 //          | ident func-args?
@@ -258,11 +261,12 @@ static Node *assign(Token **rest, Token *tok);
 static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
+static Type *struct_decl(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "int" | "char"
+// declspec = "int" | "char" | structDecl
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
@@ -272,8 +276,17 @@ static Type *declspec(Token **rest, Token *tok)
     return TyChar;
   }
   // "int"
-  *rest = skip(tok, "int");
-  return TyInt;
+  if (equal(tok, "int")) {
+    *rest = skip(tok, "int");
+    return TyInt;
+  }
+
+  // structDecl
+  if (equal(tok, "struct"))
+    return struct_decl(rest, tok->next);
+
+  errorTok(tok, "typename expected");
+  return NULL;
 }
 
 // funcParams = (param ("," param)*)? ")"
@@ -512,7 +525,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (equal(tok, "int") || equal(tok, "char"))
+    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "struct"))
       cur->next = declaration(&tok, tok);
     // stmt
     else
@@ -786,16 +799,27 @@ static Node *postfix(Token **rest, Token *tok)
   // primary
   Node *nd = primary(&tok, tok);
 
-  // ("[" expr "]")*
-  // x[y] 等价于 *(x+y)
-  // x[y][z] ==> *(*(x+y)+z)
-  while (equal(tok, "[")) {
-    Node *idx = expr(&tok, tok->next);
-    tok = skip(tok, "]");
-    nd = newbinary(ND_DEREF, NULL, newadd(nd, idx, tok), tok);
+  while (true) {
+    // ("[" expr "]")*
+    // x[y] 等价于 *(x+y)
+    // x[y][z] ==> *(*(x+y)+z)
+    if (equal(tok, "[")) {
+      Node *idx = expr(&tok, tok->next);
+      tok = skip(tok, "]");
+      nd = newbinary(ND_DEREF, NULL, newadd(nd, idx, tok), tok);
+      continue;
+    }
+
+    // "." indent
+    if (equal(tok, ".")) {
+      nd = struct_ref(nd, tok->next);
+      tok = tok->next->next;
+      continue;
+    }
+    *rest = tok;
+    return nd;
   }
-  *rest = tok;
-  return nd;
+
 }
 
 
@@ -861,6 +885,75 @@ static Node *primary(Token **rest, Token *tok)
 
   error("unexpected char '%c'\n", tok->val);
   return NULL;
+}
+
+
+// structMembers = (declspec declarator ("," declarator)* ";")*
+static void struct_members(Token **rest, Token *tok, Type *ty) {
+  Member head = {};
+  Member *cur = &head;
+
+  while (!equal(tok, "}")) {
+    // declspec
+    Type *basety = declspec(&tok, tok);
+    int first = true;
+
+    while (!consume(&tok, tok, ";")) {
+      if (!first)
+        tok = skip(tok, ",");
+      first = false;
+
+      Member *mem = calloc(1, sizeof(Member));
+      // declarator
+      mem->ty = declarator(&tok, tok, basety);
+      mem->name = mem->ty->name;
+      cur = cur->next = mem;
+    }
+  }
+
+  *rest = tok->next;
+  ty->mems = head.next;
+}
+
+// structDecl = "{" structMembers
+static Type *struct_decl(Token **rest, Token *tok) {
+  tok = skip(tok, "{");
+
+  // 构造一个结构体
+  Type *ty = calloc(1, sizeof(Type));
+  ty->kind = TY_STRUCT;
+  struct_members(rest, tok, ty);
+
+  // 结构体内成员的偏移量
+  int offset = 0;
+  for (Member *mem = ty->mems; mem; mem = mem->next) {
+    mem->offset = offset;
+    offset += mem->ty->size;
+  };
+  ty->size = offset;
+  return ty;
+}
+
+// 获取结构体成员
+static Member *get_struct_member(Type *ty, Token *tok) {
+  for (Member *mem = ty->mems; mem; mem = mem->next) {
+    if (mem->name->len == tok->len &&
+        !strncmp(mem->name->loc, tok->loc, tok->len))
+      return mem;
+  }
+  errorTok(tok, "no such member");
+  return NULL;
+}
+
+// 构建结构体成员的节点
+static Node *struct_ref(Node *left, Token *tok) {
+  add_type(left);
+  if (left->ty->kind != TY_STRUCT)
+    errorTok(left->tok, "not a struct");
+
+  Node *nd = newbinary(ND_MEMBER, NULL, left, tok);
+  nd->mem = get_struct_member(left->ty, tok);
+  return nd;
 }
 
 

@@ -105,6 +105,10 @@ void add_type(Node *nd)
   case ND_VAR:
     nd->ty = nd->var->ty;
     return;
+  // 将节点类型设为 成员的类型
+  case ND_MEMBER:
+    nd->ty = nd->mem->ty;
+    return;
   // 将节点类型设为指针，并指向左部的类型
   case ND_ADDR:
     // 右部如果是数组，则为指向数组基类的指针

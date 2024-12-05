@@ -26,3 +26,5 @@ build/
 
 # IDE相关文件夹
 .cache/
+
+compile_commands.json

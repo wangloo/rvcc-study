@@ -1,3 +1,3 @@
 #!/bin/sh
 
-export RISCV=/home/lixiang/riscv
+export RISCV=$HOME/riscv
