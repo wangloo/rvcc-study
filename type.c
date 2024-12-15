@@ -1,8 +1,16 @@
 #include "rvcc.h"
 
 // (Type) {...} 构造了一个复合字面量，相当于Type的匿名变量。
-Type *TyChar = &(Type){TY_CHAR, 1};
-Type *TyInt = &(Type){TY_INT, 8};
+Type *TyChar = &(Type){TY_CHAR, 1, 1};
+Type *TyInt = &(Type){TY_INT, 8, 8};
+
+static Type *new_type(TypeKind kind, int size, int align) {
+  Type *ty = calloc(1, sizeof(Type));
+  ty->kind = kind;
+  ty->size = size;
+  ty->align = align;
+  return ty;
+}
 
 // 判断Type是否为整数类型
 bool is_integer(Type *ty) { return ty->kind == TY_CHAR || ty->kind == TY_INT; }
@@ -11,9 +19,7 @@ bool is_integer(Type *ty) { return ty->kind == TY_CHAR || ty->kind == TY_INT; }
 // 构造一个指针类型，并且指向基类
 Type *pointerto(Type *base)
 {
-  Type *ty = calloc(1, sizeof(Type));
-  ty->kind = TY_PTR;
-  ty->size = 8;
+  Type *ty = new_type(TY_PTR, 8, 8);
   ty->base = base;
   return ty;
 }
@@ -21,10 +27,8 @@ Type *pointerto(Type *base)
 // 构造数据类型，传入数组基类，元素个数
 Type *arrayof(Type *base, int len)
 {
-  Type *ty = calloc(1, sizeof(Type));
-  ty->kind = TY_ARRAY;
   // 数组大小为所有元素大小之和
-  ty->size = base->size * len;
+  Type *ty = new_type(TY_ARRAY, base->size * len, base->align);
   ty->base = base;
   ty->arraylen = len;
   return ty;

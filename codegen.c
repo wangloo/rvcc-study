@@ -9,7 +9,7 @@ static char *ArgReg[] = {"a0", "a1", "a2", "a3", "a4", "a5"};
 // 当前的函数
 static Obj *current_fn;
 
-static int align_to(int n, int align)
+int align_to(int n, int align)
 {
   // 向上对齐 (0, align] 返回 align
   return (n+align-1) & ~(align-1);

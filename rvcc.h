@@ -142,6 +142,7 @@ typedef enum {
 typedef struct Type {
   TypeKind kind;     // 种类
   int size;          // 大小，sizeof返回的值
+  int align;         // 对齐
   struct Type *base; // 指向的类型
 
   // 变量名？
@@ -185,6 +186,7 @@ Type *copytype(Type *ty);
 Type *arrayof(Type *base, int len);
 
 
+int align_to(int n, int align);
 void error(char *fmt, ...);
 void errorAt(char *Loc, char *Fmt, ...);
 void errorTok(Token *Tok, char *Fmt, ...);

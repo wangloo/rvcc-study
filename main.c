@@ -923,14 +923,18 @@ static Type *struct_decl(Token **rest, Token *tok) {
   Type *ty = calloc(1, sizeof(Type));
   ty->kind = TY_STRUCT;
   struct_members(rest, tok, ty);
+  ty->align = 1;
 
   // 结构体内成员的偏移量
   int offset = 0;
   for (Member *mem = ty->mems; mem; mem = mem->next) {
     mem->offset = offset;
     offset += mem->ty->size;
+
+    if (ty->align < mem->ty->align)
+      ty->align = mem->ty->align;
   };
-  ty->size = offset;
+  ty->size = align_to(offset, ty->align);
   return ty;
 }
 
