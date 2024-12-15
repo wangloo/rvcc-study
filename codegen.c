@@ -22,8 +22,11 @@ static void assign_lvar_offset(Obj *prog)
     for (Obj *var = fn->locals; var; var = var->next) {
       // 为每个变量分配空间
       offset += var->ty->size;
+      // 对齐变量
+      offset = align_to(offset, var->ty->align);
       var->offset = -offset;
     }
+    // 将栈固定对齐到16字节
     fn->stacksize = align_to(offset, 16);
   }
 }
