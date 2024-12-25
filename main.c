@@ -8,10 +8,20 @@ struct VarScope {
   Obj *var;       // 对应的变量
 };
 
+typedef struct TagScope TagScope;
+struct TagScope {
+  TagScope *next; // 下一标签域
+  char *name;     // 域名城
+  Type *ty;       // 域类型
+};
+
 // 表示一个块域
 typedef struct Scope Scope;
 struct Scope {
   Scope *next;    // 指向上一级的域
+
+  // C有两个域：变量域，结构体标签域
+  TagScope *tags; // 指向当前域内的结构体标签
   VarScope *vars; // 指向当前域内的变量
 };
 // 在解析时，全部的变量实例都被累加到这个列表里。
@@ -213,6 +223,24 @@ static Obj *new_string_literal(char *str, Type *ty)
   var->initdata = str;
   return var;
 }
+
+static Type *findtag(Token *tok) {
+  for (Scope *s = Scp; s; s = s->next)
+    for (TagScope *s2 = s->tags; s2; s2 = s2->next)
+      if (equal(tok, s2->name))
+        return s2->ty;
+  return NULL;
+}
+
+static void push_tagscope(Token *tok, Type *ty) {
+  TagScope *s = calloc(1, sizeof(TagScope));
+  s->name = strndup(tok->loc, tok->len);
+  s->ty = ty;
+  s->next = Scp->tags;
+  Scp->tags = s;
+}
+
+
 
 static Node *struct_ref(Node *left, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
@@ -915,14 +943,26 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
   ty->mems = head.next;
 }
 
-// structDecl = "{" structMembers
+// structDecl = tag? "{" structMembers
 static Type *struct_decl(Token **rest, Token *tok) {
-  tok = skip(tok, "{");
+  Token *tag = NULL;
+  if (tok->kind == TK_IDENT) {
+    tag = tok;
+    tok = tok->next;
+  }
+
+  if (tag && !equal(tok, "{")) {
+    Type *ty = findtag(tag);
+    if (!ty)
+      errorTok(tok, "unknown struct type");
+    *rest = tok;
+    return ty;
+  }
 
   // 构造一个结构体
   Type *ty = calloc(1, sizeof(Type));
   ty->kind = TY_STRUCT;
-  struct_members(rest, tok, ty);
+  struct_members(rest, tok->next, ty);
   ty->align = 1;
 
   // 结构体内成员的偏移量
@@ -935,6 +975,10 @@ static Type *struct_decl(Token **rest, Token *tok) {
       ty->align = mem->ty->align;
   };
   ty->size = align_to(offset, ty->align);
+
+  // 如果有名就注册结构体类型
+  if (tag)
+    push_tagscope(tag, ty);
   return ty;
 }
 
