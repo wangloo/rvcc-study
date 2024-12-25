@@ -251,7 +251,10 @@ static Type *struct_decl(Token **rest, Token *tok);
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = "int" | "char" | structDecl
+// declspec = "int" | "char" | structDecl | unionDecl
+// structDecl = structUnionDecl
+// unionDecl = structUnionDecl
+// structUnionDecl = ident? ("{" struct Members)?
 // declarator = "*"* ident typeSuffix
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 // funcParams = (param ("," param)*)? ")"
@@ -290,11 +293,12 @@ static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
+static Type *union_decl(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "int" | "char" | structDecl
+// declspec = "int" | "char" | structDecl | unionDecl
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
@@ -312,6 +316,10 @@ static Type *declspec(Token **rest, Token *tok)
   // structDecl
   if (equal(tok, "struct"))
     return struct_decl(rest, tok->next);
+
+  // unionDecl
+  if (equal(tok, "union"))
+    return union_decl(rest, tok->next);
 
   errorTok(tok, "typename expected");
   return NULL;
@@ -553,7 +561,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "struct"))
+    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "struct") || equal(tok, "union"))
       cur->next = declaration(&tok, tok);
     // stmt
     else
@@ -951,8 +959,8 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
   ty->mems = head.next;
 }
 
-// structDecl = tag? "{" structMembers
-static Type *struct_decl(Token **rest, Token *tok) {
+// structUnionDecl = ident? ("{" struct Members)?
+static Type *struct_union_decl(Token **rest, Token *tok) {
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
     tag = tok;
@@ -973,6 +981,17 @@ static Type *struct_decl(Token **rest, Token *tok) {
   struct_members(rest, tok->next, ty);
   ty->align = 1;
 
+  // 如果有名就注册结构体类型
+  if (tag)
+    push_tagscope(tag, ty);
+  return ty;
+}
+
+// structDecl = structUnionDecl
+static Type *struct_decl(Token **rest, Token *tok) {
+  Type *ty = struct_union_decl(rest, tok);
+  ty->kind = TY_STRUCT;
+
   // 结构体内成员的偏移量
   int offset = 0;
   for (Member *mem = ty->mems; mem; mem = mem->next) {
@@ -983,10 +1002,24 @@ static Type *struct_decl(Token **rest, Token *tok) {
       ty->align = mem->ty->align;
   };
   ty->size = align_to(offset, ty->align);
+  return ty;
+}
 
-  // 如果有名就注册结构体类型
-  if (tag)
-    push_tagscope(tag, ty);
+// unionDecl = structUnionDecl
+static Type *union_decl(Token **rest, Token *tok) {
+  Type *ty = struct_union_decl(rest, tok);
+  ty->kind = TY_UNION;
+
+  // 联合体需要设置为最大的对其量与大小，变量偏移量都默认为0
+  for (Member *mem = ty->mems; mem; mem = mem->next) {
+    mem->offset = 0;
+    if (ty->align < mem->ty->align)
+      ty->align = mem->ty->align;
+    if (ty->size < mem->ty->size)
+      ty->size = mem->ty->size;
+  }
+  // 将大小对齐
+  ty->size = align_to(ty->size, ty->align);
   return ty;
 }
 
@@ -1004,14 +1037,13 @@ static Member *get_struct_member(Type *ty, Token *tok) {
 // 构建结构体成员的节点
 static Node *struct_ref(Node *left, Token *tok) {
   add_type(left);
-  if (left->ty->kind != TY_STRUCT)
-    errorTok(left->tok, "not a struct");
+  if (left->ty->kind != TY_STRUCT && left->ty->kind != TY_UNION)
+    errorTok(left->tok, "not a struct or union");
 
   Node *nd = newbinary(ND_MEMBER, NULL, left, tok);
   nd->mem = get_struct_member(left->ty, tok);
   return nd;
 }
-
 
 
 // 目标文件的路径

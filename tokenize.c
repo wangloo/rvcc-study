@@ -127,7 +127,8 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"int", "char", "struct", "return", "if", "else", "for", "while", "sizeof"};
+  char *KW[] = {"int", "char", "struct", "union",
+                "return", "if", "else", "for", "while", "sizeof"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
       return true;
@@ -425,8 +426,6 @@ Token *tokenize(char *filename, char *p)
       p++;
       continue;
     }
-
-
 
     // 处理无法识别的字符
     error("unexcepted character: '%c'\n", *p);
