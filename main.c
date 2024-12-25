@@ -269,7 +269,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // add = mul ("+" mul | "-" mul)
 // mul = unary ("*" unary | "/" unary)
 // unary = ("+" | "-" | "&" | "*") unary | postfix
-// postfix = primary ("[" expr "]" | "," ident)*
+// postfix = primary ("[" expr "]" | "." ident | "->" ident)*
 // primary = "(" "{" stmt+ "}" ")"
 //          | "(" expr ")"
 //          | ident func-args?
@@ -821,7 +821,7 @@ static Node *unary(Token **rest, Token *tok)
   return postfix(rest, tok);
 }
 
-// postfix = primary ("[" expr "]")*
+// postfix = primary ("[" expr "]" | "." ident | "->" ident)*
 static Node *postfix(Token **rest, Token *tok)
 {
   // primary
@@ -840,6 +840,14 @@ static Node *postfix(Token **rest, Token *tok)
 
     // "." indent
     if (equal(tok, ".")) {
+      nd = struct_ref(nd, tok->next);
+      tok = tok->next->next;
+      continue;
+    }
+    // "->" ident
+    if (equal(tok, "->")) {
+      // x->y 等价于 (*x).y
+      nd = newbinary(ND_DEREF, NULL, nd, tok);
       nd = struct_ref(nd, tok->next);
       tok = tok->next->next;
       continue;
