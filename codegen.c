@@ -103,8 +103,8 @@ static void pop(const char *reg)
 
 // 加载a0指向的值
 static void load(Type *ty) {
-  // 使用数组名访问，得到的结果就是地址，不用再加载
-  if (ty->kind == TY_ARRAY)
+  // 使用数组名or结构体or联合体访问，得到的结果就是地址，不用再加载
+  if (ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || ty->kind == TY_UNION)
     return;
   // 访问a0地址中存储的数据，存入到a0当中
   println("  # 读取a0中存放的地址，得到的值存入a0");
@@ -117,6 +117,19 @@ static void load(Type *ty) {
 static void store(Type *ty)
 {
   pop("a1");
+
+  if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+    println("  # 对%s进行赋值", ty->kind == TY_STRUCT ? "结构体" : "联合体");
+    for (int i = 0; i < ty->size; i++) {
+      println("  li t0, %d", i);
+      println("  add t0, a0, t0");
+      println("  lb t1, 0(t0)");
+      println("  li t0, %d", i);
+      println("  add t0, a1, t0");
+      println("  sb t1, 0(t0)");
+    }
+    return;
+  }
   println("  # 将a0的值，写入到a1中存放的地址");
   if (ty->size == 1)
     println("  sb a0, 0(a1)");
