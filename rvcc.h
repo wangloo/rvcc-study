@@ -135,6 +135,7 @@ typedef enum {
   TY_CHAR, // char 字符类型
   TY_INT, // int 整型
   TY_LONG, // long 长整型
+  TY_SHORT, // short 短整型
   TY_PTR, // 指针
   TY_FUNC, // 函数
   TY_ARRAY, // 数组
@@ -174,6 +175,7 @@ typedef struct Member {
 extern Type *TyChar;
 extern Type *TyInt;
 extern Type *TyLong;
+extern Type *TyShort;
 
 // 构建一个指针类型，并指向基类
 Type *pointerto(Type *Base);

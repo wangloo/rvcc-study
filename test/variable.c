@@ -48,6 +48,8 @@ int main() {
   ASSERT(1, ({ int x; char y; int z; char *a=&y; char *b=&z; b-a; }));
   // [57] 支持long类型
   ASSERT(8, ({ long x; sizeof(x); }));
+  // [58] 支持short类型
+  ASSERT(2, ({ short x; sizeof(x); }));
   printf("OK\n");
   return 0;
 }

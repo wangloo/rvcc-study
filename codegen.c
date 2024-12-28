@@ -110,6 +110,8 @@ static void load(Type *ty) {
   println("  # 读取a0中存放的地址，得到的值存入a0");
   if (ty->size == 1)
     println("  lb a0, 0(a0)");
+  else if (ty->size == 2)
+    println("  lh a0, 0(a0)");
   else if (ty->size == 4)
     println("  lw a0, 0(a0)");
   else
@@ -135,6 +137,8 @@ static void store(Type *ty)
   println("  # 将a0的值，写入到a1中存放的地址");
   if (ty->size == 1)
     println("  sb a0, 0(a1)");
+  else if (ty->size == 2)
+    println("  sh a0, 0(a1)");
   else if (ty->size == 4)
     println("  sw a0, 0(a1)");
   else
@@ -447,6 +451,8 @@ static void emit_text(Obj *prog) {
       println("  # 将%s寄存器的值存入%s的栈地址", ArgReg[I], var->name);
       if (var->ty->size == 1)
         println("  sb %s, %d(fp)", ArgReg[I++], var->offset);
+      else if (var->ty->size == 2)
+        println("  sh %s, %d(fp)", ArgReg[I++], var->offset);
       else if (var->ty->size == 4)
         println("  sw %s, %d(fp)", ArgReg[I++], var->offset);
       else if (var->ty->size == 8)
