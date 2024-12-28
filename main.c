@@ -253,7 +253,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
-// declarator = "*"* ident typeSuffix
+// declarator = "*"* ("(" declarator ")" | ident) typeSuffix
 // typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
 // funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
@@ -391,13 +391,27 @@ static Type *type_suffix(Token **rest, Token *tok, Type *ty)
   return ty;
 }
 
-// declarator = "*"* ident typesuffix
+// declarator = "*"* ("(" declarator ")" | ident) typeSuffix
 static Type *declarator(Token **rest, Token *tok, Type *ty)
 {
   // "*"*
   // 构建所有的（多重）指针
   while (consume(&tok, tok, "*"))
     ty = pointerto(ty);
+
+  // "(" declarator ")"
+  if (equal(tok, "(")) {
+    // 记录 "(" 的位置
+    Token *start = tok;
+    Type dummy = {};
+    // 使tok 前进到")"之后的位置
+    declarator(&tok, start->next, &dummy);
+    tok = skip(tok, ")");
+    // 获取到")"后面的类型后缀，ty为解析完的类型，rest指向分号
+    ty = type_suffix(rest, tok, ty);
+    // 解析ty整体作为base去构造，返回Type类型
+    return declarator(&tok, start->next, ty);
+  }
 
   if (tok->kind != TK_IDENT)
     errorTok(tok, "expected a variable name");
