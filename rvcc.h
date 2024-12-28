@@ -188,6 +188,8 @@ Type *arrayof(Type *base, int len);
 
 
 int align_to(int n, int align);
+// 指rvcc源文件的某个文件的某一行出了问题，打印出文件名和行号
+#define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
 void error(char *fmt, ...);
 void errorAt(char *Loc, char *Fmt, ...);
 void errorTok(Token *Tok, char *Fmt, ...);
