@@ -1123,7 +1123,7 @@ int main(int Argc, char **Argv) {
   // 生成代码
   FILE *out = openfile(OptO);
   // .fiule 文件编号 文件名
-  fprintf(out, ".file 1\"%s\"\n", InputPath);
+  fprintf(out, ".file 1 \"%s\"\n", InputPath);
   codegen(prog, out);
   return 0;
 }
