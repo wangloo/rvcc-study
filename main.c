@@ -184,7 +184,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   // ptr - num
   if (left->ty->kind == TY_PTR
       && right->ty->kind == TY_INT) {
-    right = newbinary(ND_MUL, right, newnum(8, tok), tok);
+    right = newbinary(ND_MUL, right, newnum(left->ty->base->size, tok), tok);
     add_type(right);
     Node *nd = newbinary(ND_SUB, left, right, tok);
     // 节点类型为指针
