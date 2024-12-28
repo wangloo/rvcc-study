@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
@@ -30,7 +31,7 @@ typedef struct Type Type;
 typedef struct Token {
   TokenKind kind;
   struct Token *next;
-  int val;
+  int64_t val;
   char *loc;
   int len;
 
@@ -83,7 +84,7 @@ typedef struct Node {
   struct Node *right;
   Obj *var;          // 存储ND_VAL种类的变量
   struct Node *body; // 代码块 或 语句表达式
-  int val;           // 存储ND_NUM种类的值
+  int64_t val;       // 存储ND_NUM种类的值
 
   // 结构体成员访问
   Member *mem;
@@ -133,6 +134,7 @@ typedef struct Obj {
 typedef enum {
   TY_CHAR, // char 字符类型
   TY_INT, // int 整型
+  TY_LONG, // long 长整型
   TY_PTR, // 指针
   TY_FUNC, // 函数
   TY_ARRAY, // 数组
@@ -171,6 +173,7 @@ typedef struct Member {
 // 声明全局变量，定义在type.c中
 extern Type *TyChar;
 extern Type *TyInt;
+extern Type *TyLong;
 
 // 构建一个指针类型，并指向基类
 Type *pointerto(Type *Base);

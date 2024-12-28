@@ -23,6 +23,10 @@ int fib(int x) {
     return 1;
   return fib(x-1) + fib(x-2);
 }
+// [57] 支持long类型
+int sub_long(long a, long b, long c) {
+  return a - b - c;
+}
 int main() {
   // [25] 支持零参函数定义
   ASSERT(3, ret3());

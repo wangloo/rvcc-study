@@ -154,7 +154,7 @@ static void gen_expr(Node *nd)
   println(" .loc 1 %d", nd->tok->lineno);
   if (nd->kind == ND_NUM) {
     println("  # 将%d加载到a0中", nd->val);
-    println("  li a0, %d", nd->val);
+    println("  li a0, %ld", nd->val);
     return;
   }
   if (nd->kind == ND_NEG) {

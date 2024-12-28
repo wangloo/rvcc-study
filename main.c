@@ -123,7 +123,7 @@ static Node *newnode(NodeKind kind, Token *tok)
 }
 
 
-static Node *newnum(int val, Token *tok)
+static Node *newnum(int64_t val, Token *tok)
 {
   Node *nd = newnode(ND_NUM, tok);
   nd->val = val;
@@ -155,8 +155,7 @@ static Node *newadd(Node *left, Node *right, Token *tok)
     errorTok(tok, "invalid operands");
 
   // 将 num + ptr 转换为 ptr + num
-  if (left->ty->kind == TY_INT
-      && right->ty->base) {
+  if (is_integer(left->ty) && right->ty->base) {
     Node *tmp = left;
     left = right;
     right = tmp;
@@ -182,8 +181,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
     return newbinary(ND_SUB, left, right, tok);
 
   // ptr - num
-  if (left->ty->kind == TY_PTR
-      && right->ty->kind == TY_INT) {
+  if (left->ty->kind == TY_PTR && is_integer(right->ty)) {
     right = newbinary(ND_MUL, right, newnum(left->ty->base->size, tok), tok);
     add_type(right);
     Node *nd = newbinary(ND_SUB, left, right, tok);
@@ -251,7 +249,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = "int" | "char" | structDecl | unionDecl
+// declspec = "int" | "long" | "char" | structDecl | unionDecl
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -298,7 +296,7 @@ static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "int" | "char" | structDecl | unionDecl
+// declspec = "int" | "long" | "char" | structDecl | unionDecl
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
@@ -311,6 +309,11 @@ static Type *declspec(Token **rest, Token *tok)
   if (equal(tok, "int")) {
     *rest = skip(tok, "int");
     return TyInt;
+  }
+  // "long"
+  if (equal(tok, "long")) {
+    *rest = skip(tok, "long");
+    return TyLong;
   }
 
   // structDecl
@@ -561,7 +564,8 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "struct") || equal(tok, "union"))
+    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "long")
+        || equal(tok, "struct") || equal(tok, "union"))
       cur->next = declaration(&tok, tok);
     // stmt
     else

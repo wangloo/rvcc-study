@@ -3,6 +3,7 @@
 // (Type) {...} 构造了一个复合字面量，相当于Type的匿名变量。
 Type *TyChar = &(Type){TY_CHAR, 1, 1};
 Type *TyInt = &(Type){TY_INT, 4, 4};
+Type *TyLong = &(Type){TY_LONG, 8, 8};
 
 static Type *new_type(TypeKind kind, int size, int align) {
   Type *ty = calloc(1, sizeof(Type));
@@ -13,7 +14,9 @@ static Type *new_type(TypeKind kind, int size, int align) {
 }
 
 // 判断Type是否为整数类型
-bool is_integer(Type *ty) { return ty->kind == TY_CHAR || ty->kind == TY_INT; }
+bool is_integer(Type *ty) {
+  return ty->kind == TY_CHAR || ty->kind == TY_INT || ty->kind == TY_LONG;
+}
 
 
 // 构造一个指针类型，并且指向基类
@@ -96,14 +99,14 @@ void add_type(Node *nd)
   case ND_COMMA:
     nd->ty = nd->right->ty;
     return;
-  // 将节点类型设为 int
+  // 将节点类型设为 long，没有实际含义
   case ND_EQ:
   case ND_NE:
   case ND_LT:
   case ND_LE:
   case ND_NUM:
   case ND_FUNCALL:
-    nd->ty = TyInt;
+    nd->ty = TyLong;
     return;
   // 将节点类型设为 变量的类型
   case ND_VAR:

@@ -74,7 +74,7 @@ void errorTok(Token *Tok, char *Fmt, ...) {
   exit(1);
 }
 
-static int getnumber(Token *tok)
+static long getnumber(Token *tok)
 {
   if (tok->kind != TK_NUM)
     error("expect a number");
@@ -127,7 +127,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"int", "char", "struct", "union",
+  char *KW[] = {"int", "long", "char", "struct", "union",
                 "return", "if", "else", "for", "while", "sizeof"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))
