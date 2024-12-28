@@ -249,7 +249,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = "int" | "long" | "short" | "char" | structDecl | unionDecl
+// declspec = "void" | "int" | "long" | "short" | "char" | structDecl | unionDecl
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -296,10 +296,15 @@ static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "int" | "long" | "short" | "char" | structDecl | unionDecl
+// declspec = "void" | "int" | "long" | "short" | "char" | structDecl | unionDecl
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
+  // "void"
+  if (equal(tok, "void")) {
+    *rest = skip(tok, "void");
+    return TyVoid;
+  }
   // "char"
   if (equal(tok, "char")) {
     *rest = skip(tok, "char");
@@ -552,6 +557,8 @@ static Node *declaration(Token **rest, Token *tok)
 
     // declarator
     Type *ty = declarator(&tok, tok, basety);
+    if (ty->kind == TY_VOID)
+      errorTok(tok, "variable declared void");
     Obj *var = new_local(get_ident(ty->name), ty);
 
     // 如果不存在"="则为变量声明，不需要生成节点，已经存储在Locals中了
@@ -589,7 +596,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
   while (!equal(tok, "}")) {
     // declaration
     if (equal(tok, "int") || equal(tok, "char") || equal(tok, "short") || equal(tok, "long")
-        || equal(tok, "struct") || equal(tok, "union"))
+        || equal(tok, "void") || equal(tok, "struct") || equal(tok, "union"))
       cur->next = declaration(&tok, tok);
     // stmt
     else

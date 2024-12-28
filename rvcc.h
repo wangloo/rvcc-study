@@ -133,6 +133,7 @@ typedef struct Obj {
 
 // 类型种类
 typedef enum {
+  TY_VOID, // void 类型
   TY_CHAR, // char 字符类型
   TY_INT, // int 整型
   TY_LONG, // long 长整型
@@ -173,6 +174,7 @@ typedef struct Member {
 } Member;
 
 // 声明全局变量，定义在type.c中
+extern Type *TyVoid;
 extern Type *TyChar;
 extern Type *TyInt;
 extern Type *TyLong;

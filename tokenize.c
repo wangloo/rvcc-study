@@ -89,7 +89,7 @@ bool equal(Token *tok, char *str)
 Token *skip(Token *tok, char *str)
 {
   if (!equal(tok, str))
-    error("expect: %s\n", str);
+    errorTok(tok, "expect: %s\n", str);
   return tok->next;
 }
 
@@ -127,7 +127,7 @@ static bool isident2(char c)
 
 static bool iskeyword(Token *tok)
 {
-  char *KW[] = {"int", "long", "char", "struct", "union",
+  char *KW[] = {"void", "int", "long", "char", "struct", "union",
                 "return", "if", "else", "for", "while", "sizeof"};
   for (int i = 0; i < sizeof(KW)/sizeof(*KW); i++) {
     if (equal(tok, KW[i]))

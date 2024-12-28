@@ -1,6 +1,7 @@
 #include "rvcc.h"
 
 // (Type) {...} 构造了一个复合字面量，相当于Type的匿名变量。
+Type *TyVoid = &(Type){TY_VOID, 1, 1};
 Type *TyChar = &(Type){TY_CHAR, 1, 1};
 Type *TyShort = &(Type){TY_SHORT, 2, 2};
 Type *TyInt = &(Type){TY_INT, 4, 4};
@@ -131,6 +132,8 @@ void add_type(Node *nd)
     // 如果不存在基类，则无法解引用
     if (!nd->right->ty->base)
       errorTok(nd->tok, "invalid pointer dereference");
+    if (nd->right->ty->base->kind == TY_VOID)
+      errorTok(nd->tok, "deferencing a void pointer");
     nd->ty = nd->right->ty->base;
     return;
   // 节点类型为 最后的表达式语句的类型
