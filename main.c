@@ -244,7 +244,7 @@ static Node *struct_ref(Node *left, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 
 // program = (functionDefinition | globalVariable)*
-// functionDefinition = declspec declarator "{" compoundStmt
+// functionDefinition = declspec declarator (";" | "{" compoundStmt)
 // globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
@@ -481,13 +481,18 @@ static void create_param_lvars(Type *param)
   }
 }
 
-// functionDefinition = declspec declarator "{" compoundStmt
+// functionDefinition = declspec declarator (";" | "{" compoundStmt)
 static Token *function(Token *tok, Type *base)
 {
   Type *ty = declarator(&tok, tok, base);
 
   Obj *fn = new_global(get_ident(ty->name), ty);
   fn->is_function = true;
+  fn->is_definition = !consume(&tok, tok, ";");
+
+  // 判断是否没有函数定义
+  if (!fn->is_definition)
+    return tok;
 
   // 清空全局变量Locals
   Locals = NULL;

@@ -409,7 +409,7 @@ static void emit_data(Obj *prog) {
 static void emit_text(Obj *prog) {
   // 为每个函数单独生成代码
   for (Obj *fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function)
+    if (!fn->is_function || !fn->is_definition)
       continue;
 
     println("  # 定义全局%s段", fn->name);
