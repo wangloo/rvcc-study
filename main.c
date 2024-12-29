@@ -201,6 +201,13 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   return NULL;
 }
 
+
+static bool is_typename(Token *tok) {
+  return equal(tok, "int") || equal(tok, "char") || equal(tok, "short") ||
+         equal(tok, "long") || equal(tok, "void") || equal(tok, "struct") ||
+         equal(tok, "union");
+}
+
 // 新增唯一名称
 static char *new_unique_name(void)
 {
@@ -249,7 +256,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = "void" | "int" | "long" | "short" | "char" | structDecl | unionDecl
+// declspec = ("void" | "int" | "long" | "short" | "char" | structDecl | unionDecl)+
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -296,46 +303,83 @@ static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = "void" | "int" | "long" | "short" | "char" | structDecl | unionDecl
+// declspec = ("void" | "int" | "long" | "short" | "char" | structDecl | unionDecl)+
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok)
 {
-  // "void"
-  if (equal(tok, "void")) {
-    *rest = skip(tok, "void");
-    return TyVoid;
-  }
-  // "char"
-  if (equal(tok, "char")) {
-    *rest = skip(tok, "char");
-    return TyChar;
-  }
-  // "short"
-  if (equal(tok, "short")) {
-    *rest = skip(tok, "short");
-    return TyShort;
-  }
-  // "int"
-  if (equal(tok, "int")) {
-    *rest = skip(tok, "int");
-    return TyInt;
-  }
-  // "long"
-  if (equal(tok, "long")) {
-    *rest = skip(tok, "long");
-    return TyLong;
-  }
+  // 类型的组合，被表示为例如：LONG+LONG=1<<9
+  // 可知 long int 和 int long 是等价的
+  enum {
+    VOID = 1 << 0,
+    CHAR = 1 << 2,
+    SHORT = 1 << 4,
+    INT = 1 << 6,
+    LONG = 1 << 8,
+    OTHER = 1 << 10,
+  };
+  Type *ty = TyInt;
+  int counter = 0; // 记录类型相加的值
 
-  // structDecl
-  if (equal(tok, "struct"))
-    return struct_decl(rest, tok->next);
+  // 遍历所有类型的 tok
+  while (is_typename(tok)) {
+    if (equal(tok, "struct") || equal(tok, "union")) {
+      // structDecl
+      if (equal(tok, "struct"))
+        ty = struct_decl(&tok, tok->next);
+      // unionDecl
+      else
+        ty = union_decl(&tok, tok->next);
+      counter += OTHER;
+      continue;
+    }
 
-  // unionDecl
-  if (equal(tok, "union"))
-    return union_decl(rest, tok->next);
+    // 对于出现的类型名加入 counter
+    // 每一步的counter都需要有合法值
+    // "void"
+    if (equal(tok, "void"))
+      counter += VOID;
+    // "char"
+    else if (equal(tok, "char"))
+      counter += CHAR;
+    // "short"
+    else if (equal(tok, "short"))
+      counter += SHORT;
+    // "int"
+    else if (equal(tok, "int"))
+      counter += INT;
+    // "long"
+    else if (equal(tok, "long"))
+      counter += LONG;
+    else
+      unreachable();
 
-  errorTok(tok, "typename expected");
-  return NULL;
+    // 根据 counter 值映射到对应的 Type
+    switch (counter) {
+    case VOID:
+      ty = TyVoid;
+      break;
+    case CHAR:
+      ty = TyChar;
+      break;
+    case SHORT:
+    case SHORT + INT:
+      ty = TyShort;
+      break;
+    case INT:
+      ty = TyInt;
+      break;
+    case LONG:
+    case LONG + INT:
+      ty = TyLong;
+      break;
+    default:
+      errorTok(tok, "invalid type");
+
+    }
+    tok = tok->next;
+  }
+  *rest = tok;
+  return ty;
 }
 
 // funcParams = (param ("," param)*)? ")"
@@ -595,8 +639,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (equal(tok, "int") || equal(tok, "char") || equal(tok, "short") || equal(tok, "long")
-        || equal(tok, "void") || equal(tok, "struct") || equal(tok, "union"))
+    if (is_typename(tok))
       cur->next = declaration(&tok, tok);
     // stmt
     else
