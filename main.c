@@ -1,11 +1,12 @@
 #include "rvcc.h"
 
-// 局部和全局变量的域
+// 局部和全局变量 或是typedef 的域
 typedef struct VarScope VarScope;
 struct VarScope {
   VarScope *next; // 下一个变量域
   char *name;     // 变量域名称
   Obj *var;       // 对应的变量
+  Type *typede;   // 别名
 };
 
 typedef struct TagScope TagScope;
@@ -24,6 +25,12 @@ struct Scope {
   TagScope *tags; // 指向当前域内的结构体标签
   VarScope *vars; // 指向当前域内的变量
 };
+
+// 变量属性
+typedef struct {
+  bool is_typedef; // 是否为类型别名
+} VarAttr;
+
 // 在解析时，全部的变量实例都被累加到这个列表里。
 Obj *Locals;  // 局部变量
 Obj *Globals; // 全局变量
@@ -31,14 +38,14 @@ Obj *Globals; // 全局变量
 // 所有域的链表
 static Scope *Scp = &(Scope){};
 
-static Obj *findvar(Token *tok)
-{
+// 通过名称查找变量
+static VarScope *findvar(Token *tok) {
   // 此处越先匹配的域，越深层
   for (Scope *s = Scp; s; s = s->next)
     // 遍历域内的所有变量
     for (VarScope *s2 = s->vars; s2; s2 = s2->next)
       if (equal(tok, s2->name))
-        return s2->var;
+        return s2;
   return NULL;
 }
 
@@ -57,10 +64,9 @@ static void leave_scope(void) {
 
 
 // 将变量存入当前的域中
-static VarScope *push_scope(char *name, Obj *var) {
+static VarScope *push_scope(char *name) {
   VarScope *s = calloc(1, sizeof(VarScope));
   s->name = name;
-  s->var = var;
   // 后来的在链表头部；
   s->next = Scp->vars;
   Scp->vars = s;
@@ -77,7 +83,7 @@ static Obj *new_local(char *name, Type *ty)
   var->ty = ty;
   var->is_local = true;
   Locals = var;
-  push_scope(name, var);
+  push_scope(name)->var = var;
   return var;
 }
 
@@ -90,7 +96,7 @@ static Obj *new_global(char *name, Type *ty)
   var->ty = ty;
   var->is_local = false;
   Globals = var;
-  push_scope(name, var);
+  push_scope(name)->var = var;
   return var;
 }
 
@@ -100,6 +106,18 @@ static char *get_ident(Token *tok)
   if (tok->kind != TK_IDENT)
     errorTok(tok, "expected an identifier");
   return strndup(tok->loc, tok->len);
+}
+
+// 查找类型别名
+static Type *find_typdef(Token *tok) {
+  // 类型别名是个标识符
+  if (tok->kind == TK_IDENT) {
+    // 查找是否存在与变量域内
+    VarScope *s = findvar(tok);
+    if (s)
+      return s->typede;
+  }
+  return NULL;
 }
 
 // 新建一个二叉树节点
@@ -205,7 +223,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 static bool is_typename(Token *tok) {
   return equal(tok, "int") || equal(tok, "char") || equal(tok, "short") ||
          equal(tok, "long") || equal(tok, "void") || equal(tok, "struct") ||
-         equal(tok, "union");
+         equal(tok, "union") || equal(tok, "typedef") || find_typdef(tok);
 }
 
 // 新增唯一名称
@@ -250,13 +268,15 @@ static void push_tagscope(Token *tok, Type *ty) {
 static Node *struct_ref(Node *left, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 
-// program = (functionDefinition | globalVariable)*
+// program = ( typedef | functionDefinition | globalVariable)*
 // functionDefinition = declspec declarator (";" | "{" compoundStmt)
 // globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = ("void" | "int" | "long" | "short" | "char" | structDecl | unionDecl)+
+// declspec = ("void" | "int" | "long" | "short" | "char"
+//             | "typedef"
+//             | structDecl | unionDecl | typedefName)+
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -288,7 +308,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 static Token *function(Token *tok, Type *base);
 static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
-static Node *declaration(Token **rest, Token *tok);
+static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
@@ -303,9 +323,11 @@ static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 
-// declspec = ("void" | "int" | "long" | "short" | "char" | structDecl | unionDecl)+
+// declspec = ("void" | "int" | "long" | "short" | "char"
+//             | "typedef"
+//             | structDecl | unionDecl | typedefName)+
 // declarator specifier
-static Type *declspec(Token **rest, Token *tok)
+static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
 {
   // 类型的组合，被表示为例如：LONG+LONG=1<<9
   // 可知 long int 和 int long 是等价的
@@ -322,13 +344,33 @@ static Type *declspec(Token **rest, Token *tok)
 
   // 遍历所有类型的 tok
   while (is_typename(tok)) {
-    if (equal(tok, "struct") || equal(tok, "union")) {
-      // structDecl
-      if (equal(tok, "struct"))
+    // 处理typedef 关键字
+    if (equal(tok, "typedef")) {
+      if (!attr)
+        errorTok(tok, "storage class specifier is not allowed in this context");
+      attr->is_typedef = true;
+      tok = tok->next;
+      continue;
+    }
+
+    // 处理用户定义的关键字
+    Type *ty2 = find_typdef(tok);
+    if (equal(tok, "struct") || equal(tok, "union") || ty2) {
+      if (counter)
+        break;
+
+      if (equal(tok, "struct")) {
+        // structDecl
         ty = struct_decl(&tok, tok->next);
-      // unionDecl
-      else
+      } else if (equal(tok, "union")) {
+        // unionDecl
         ty = union_decl(&tok, tok->next);
+      } else {
+        // 将类型设为类型别名指向的类型
+        ty = ty2;
+        tok = tok->next;
+      }
+
       counter += OTHER;
       continue;
     }
@@ -396,7 +438,7 @@ static Type *func_params(Token **rest, Token *tok, Type *ty)
     // param ("," param)*
     if (cur != &head)
       tok = skip(tok, ",");
-    Type *basety = declspec(&tok, tok);
+    Type *basety = declspec(&tok, tok, NULL);
     Type *declarty = declarator(&tok, tok, basety);
     cur->next = copytype(declarty);
     cur = cur->next;
@@ -498,15 +540,38 @@ static Node *funcall(Token **rest, Token *tok)
   return nd;
 }
 
+// 解析类型别名
+static Token *parse_typedef(Token *tok, Type *basety) {
+  bool first = true;
+
+  while (!consume(&tok, tok, ";")) {
+    if (!first)
+      tok = skip(tok, ",");
+    first = false;
+
+    Type *ty = declarator(&tok, tok, basety);
+    // 类型别名的变量名存入变量域中，并设置别名
+    push_scope(get_ident(ty->name))->typede = ty;
+  }
+  return tok;
+}
+
 
 // 语法分析入口函数
-// program = (functionDefinition | globalVariable)*
+// program = (typedef | functionDefinition | globalVariable)*
 Obj *parse(Token **rest, Token *tok)
 {
   Globals = NULL;
 
   while (tok->kind != TK_EOF) {
-    Type *basety = declspec(&tok, tok);
+    VarAttr attr = {};
+    Type *basety = declspec(&tok, tok, &attr);
+
+    // typedef
+    if (attr.is_typedef) {
+      tok = parse_typedef(tok, basety);
+      continue;
+    }
 
     // 函数
     if (is_function(tok)) {
@@ -584,12 +649,8 @@ static Token *global_variable(Token *tok, Type *base)
 
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-static Node *declaration(Token **rest, Token *tok)
+static Node *declaration(Token **rest, Token *tok, Type *basety)
 {
-  // declspec
-  // 声明的 基础类型
-  Type *basety = declspec(&tok, tok);
-
   Node head = {};
   Node *cur = &head;
   // 对变量声明次数的计数
@@ -641,11 +702,22 @@ static Node *compound_stmt(Token **rest, Token *tok)
   // stmt*
   while (!equal(tok, "}")) {
     // declaration
-    if (is_typename(tok))
-      cur->next = declaration(&tok, tok);
+    if (is_typename(tok)) {
+      VarAttr attr = {};
+      Type *basety = declspec(&tok, tok, &attr);
+
+      // 解析typedef的语句
+      if (attr.is_typedef) {
+        tok = parse_typedef(tok, basety);
+        continue;
+      }
+      // 解析变量声明的语句
+      cur->next = declaration(&tok, tok, basety);
+    }
     // stmt
-    else
+    else {
       cur->next = stmt(&tok, tok);
+    }
     cur = cur->next;
     // 构造完AST后，为节点添加类型信息
     add_type(cur);
@@ -978,13 +1050,13 @@ static Node *primary(Token **rest, Token *tok)
     if (equal(tok->next, "(")) {
       return funcall(rest, tok);
     } else {
-      Obj *var = findvar(tok);
-      if (!var) {
+      VarScope *s  = findvar(tok);
+      if (!s || !s->var) {
         // 未声明就使用变量，报错
         errorTok(tok, "undefined variable");
       }
       *rest = tok->next;
-      return newvar(var, tok);
+      return newvar(s->var, tok);
     }
   }
   // num
@@ -1019,7 +1091,7 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
 
   while (!equal(tok, "}")) {
     // declspec
-    Type *basety = declspec(&tok, tok);
+    Type *basety = declspec(&tok, tok, NULL);
     int first = true;
 
     while (!consume(&tok, tok, ";")) {

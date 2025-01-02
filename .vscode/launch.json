@@ -10,7 +10,7 @@
           "name": "Debug",
           "program": "${workspaceFolder}/rvcc",
           "args": [
-              "int main() { return \\\"\\a\\\"[0]; }"
+              "build/typedef.c"
           ],
           "environment": [
               {
