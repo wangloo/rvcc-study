@@ -550,7 +550,7 @@ static Node *funcall(Token **rest, Token *tok)
   Node head = {};
   Node *cur = &head;
   Token *start = tok;
-  Type *ty;
+  Type *ty, *param_ty;
 
   VarScope *s = findvar(start);
   if (!s)
@@ -558,12 +558,25 @@ static Node *funcall(Token **rest, Token *tok)
   if (!s->var || s->var->ty->kind != TY_FUNC)
     errorTok(start, "not a function");
 
-  ty = s->var->ty->returnty;
+  ty = s->var->ty;
+  param_ty = ty->params;
   tok = tok->next->next;
   while (!equal(tok, ")")) {
     if (cur != &head)
       tok = skip(tok, ",");
-    cur->next = assign(&tok, tok);
+    // assign
+    Node *arg = assign(&tok, tok);
+    add_type(arg);
+
+    if (param_ty) {
+      if (param_ty->kind == TY_STRUCT || param_ty->kind == TY_UNION)
+        errorTok(arg->tok, "passing struct or union is not support yet");
+      // 将参数节点的类型进行转换
+      arg = newcast(arg, param_ty);
+      // 前进到下一个形参类型
+      param_ty = param_ty->next;
+    }
+    cur->next = arg;
     cur = cur->next;
     add_type(cur);
   }
@@ -571,7 +584,10 @@ static Node *funcall(Token **rest, Token *tok)
   Node *nd = newnode(ND_FUNCALL, tok);
   nd->func_name = strndup(start->loc, start->len);
   nd->args = head.next;
-  nd->ty = ty;
+  // 函数类型
+  nd->func_type = ty;
+  // 读取的返回类型
+  nd->ty = ty->returnty;
   *rest = skip(tok, ")");
   return nd;
 }

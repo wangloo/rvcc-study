@@ -92,6 +92,7 @@ typedef struct Node {
 
   // 函数调用
   char *func_name;    // 函数名
+  Type *func_type;    // 函数类型
   struct Node *args;  // 函数参数
 
   // if 语句 或者 "for" 语句
