@@ -37,6 +37,8 @@ Obj *Globals; // 全局变量
 
 // 所有域的链表
 static Scope *Scp = &(Scope){};
+// 指向当前正在解析的函数
+static Obj *CurrentFn;
 
 // 通过名称查找变量
 static VarScope *findvar(Token *tok) {
@@ -644,6 +646,7 @@ static Token *function(Token *tok, Type *base)
   if (!fn->is_definition)
     return tok;
 
+  CurrentFn = fn;
   // 清空全局变量Locals
   Locals = NULL;
   // 进入新的域
@@ -832,7 +835,13 @@ static Node *stmt(Token **rest, Token *tok)
   }
   // "return" expr ";"
   if (equal(tok, "return")) {
-    Node *nd = newbinary(ND_RETURN, NULL, expr(&tok, tok->next), tok);
+    Node *nd = newnode(ND_RETURN, tok);
+    Node *exp = expr(&tok, tok->next);
+
+    add_type(exp);
+    // 对返回值的类型进行转换
+    nd->right = newcast(exp, CurrentFn->ty->returnty);
+
     *rest = skip(tok, ";");
     return nd;
   }
