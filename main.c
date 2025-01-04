@@ -304,6 +304,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 //          | num
 //          | str
 //          | "sizeof" unary
+//          | "sizeof" "(" typeName ")"
+// typeName = declspec abstractDeclarator
+// abstractDeclarator = "*"* ("(" abstractDeclarator ")")? typeSuffix
 // funcall = ident "(" (assign ("," assign)*)? ")"
 static Token *function(Token *tok, Type *base);
 static Token *global_variable(Token *tok, Type *base);
@@ -1018,6 +1021,40 @@ static Node *postfix(Token **rest, Token *tok)
 
 }
 
+// abstractDeclarator = "*"* ("(" abstractDeclarator ")")? typeSuffix
+static Type *abstract_declarator(Token **rest, Token *tok, Type *ty) {
+  // "*"*
+  while (equal(tok, "*")) {
+    ty = pointerto(ty);
+    tok = tok->next;
+  }
+
+  // ("(" abstractDeclarator ")")?
+  if (equal(tok, "(")) {
+    // 记录 "(" 的位置
+    Token *start = tok;
+    Type dummy = {};
+    // 使tok 前进到")"之后的位置
+    abstract_declarator(&tok, start->next, &dummy);
+    tok = skip(tok, ")");
+    // 获取到")"后面的类型后缀，ty为解析完的类型，rest指向分号
+    ty = type_suffix(rest, tok, ty);
+    // 解析ty整体作为base去构造，返回Type类型
+    return abstract_declarator(&tok, start->next, ty);
+  }
+
+  // typeSuffix
+  return type_suffix(rest, tok, ty);
+}
+
+// typeName = declspec abstractDeclarator
+// 获取类型的相关信息
+static Type *typename(Token  **rest, Token *tok) {
+  // declspec
+  Type *ty = declspec(&tok, tok, NULL);
+  // abstractDeclarator
+  return abstract_declarator(rest, tok, ty);
+}
 
 // 解析括号、数字、变量
 // primary = "(" "{" stmt+ "}" ")"
@@ -1026,8 +1063,11 @@ static Node *postfix(Token **rest, Token *tok)
 //          | num
 //          | str
 //          | "sizeof" unary
+//          | "sizeof" "(" typeName ")"
 static Node *primary(Token **rest, Token *tok)
 {
+  Token *start = tok;
+
   // "(" "{" stmt+ "}" ")"
   if (equal(tok, "(") && equal(tok->next, "{")) {
     // This is a GNU statement expression.
@@ -1071,6 +1111,13 @@ static Node *primary(Token **rest, Token *tok)
     return newvar(var, tok);
   }
 
+  // "sizeof" "(" typeName ")"
+  if (equal(tok, "sizeof") && equal(tok->next, "(") &&
+      is_typename(tok->next->next)) {
+    Type *ty = typename(&tok, tok->next->next);
+    *rest = skip(tok, ")");
+    return newnum(ty->size, start);
+  }
   // "sizeof" unary
   if (equal(tok, "sizeof")) {
     Node *nd = unary(&tok, tok->next);
