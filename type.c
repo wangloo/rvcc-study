@@ -55,6 +55,23 @@ Type *copytype(Type *ty)
   return ret;
 }
 
+// 获取容纳左右部的类型
+static Type *get_common_type(Type *ty1, Type *ty2) {
+  if (ty1->base)
+    return pointerto(ty1->base);
+  if (ty1->size == 8 || ty2->size == 8)
+    return TyLong;
+  return TyInt;
+}
+
+// 进行常规的算术转换
+static void usual_arith_conv(Node **lhs, Node **rhs) {
+  Type *ty = get_common_type((*lhs)->ty, (*rhs)->ty);
+  // 将左右部转换为兼容的类型
+  *lhs = newcast(*lhs, ty);
+  *rhs = newcast(*rhs, ty);
+}
+
 // 为节点内的所有节点添加类型
 void add_type(Node *nd)
 {
@@ -79,23 +96,40 @@ void add_type(Node *nd)
     add_type(n);
 
   switch (nd->kind) {
+  // 判断是否val强制转换为int后依然完整，完整用int否则用long
+  case ND_NUM:
+    nd->ty = (nd->val == (int)nd->val) ? TyInt : TyLong;
+    return;
   // 将节点类型设为 节点左部的类型
   case ND_ADD:
   case ND_SUB:
+    // 左右部转换
+    usual_arith_conv(&nd->left, &nd->right);
     // ADD 和 SUB 都调整为 ptr +- num 的形式了，ptr永远在左边
     // 所以要返回左边的类型。
     nd->ty = nd->left->ty;
     return;
   case ND_MUL:
   case ND_DIV:
-  case ND_NEG:
+    // 左右部转换
+    usual_arith_conv(&nd->left, &nd->right);
     nd->ty = nd->right->ty;
     return;
+  case ND_NEG: {
+    // 对右部进行转换
+    Type *ty = get_common_type(TyInt, nd->right->ty);
+    nd->right = newcast(nd->right, ty);
+    nd->ty = ty;
+    return;
+  }
   // 将节点类型设为 节点右部的类型
   // 右部不能是数组节点
   case ND_ASSIGN:
     if (nd->left->ty->kind == TY_ARRAY)
       errorTok(nd->left->tok, "not an lvalue");
+    if (nd->left->ty->kind != TY_STRUCT)
+      // 对右部转换
+      nd->right = newcast(nd->right, nd->left->ty);
     nd->ty = nd->left->ty;
     return;
   // 将节点类型设为 右部的类型
@@ -107,7 +141,10 @@ void add_type(Node *nd)
   case ND_NE:
   case ND_LT:
   case ND_LE:
-  case ND_NUM:
+    // 对左右部进行转换
+    usual_arith_conv(&nd->left, &nd->right);
+    nd->ty = TyInt;
+    return;
   case ND_FUNCALL:
     nd->ty = TyLong;
     return;

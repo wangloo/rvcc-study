@@ -181,6 +181,8 @@ extern Type *TyInt;
 extern Type *TyLong;
 extern Type *TyShort;
 
+// 类型转换，将表达式的值转换为另一种类型
+Node *newcast(Node *expr, Type *ty);
 // 构建一个指针类型，并指向基类
 Type *pointerto(Type *Base);
 // 函数类型

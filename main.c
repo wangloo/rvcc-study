@@ -148,6 +148,12 @@ static Node *newnum(int64_t val, Token *tok)
   return nd;
 }
 
+static Node *newlong(int64_t val, Token *tok) {
+  Node *nd = newnode(ND_NUM, tok);
+  nd->val = val;
+  nd->ty = TyLong;
+}
+
 static Node *newvar(Obj *var, Token *tok)
 {
   Node *nd = newbinary(ND_VAR, NULL, NULL, tok);
@@ -156,7 +162,7 @@ static Node *newvar(Obj *var, Token *tok)
 }
 
 // 新转换
-static Node *newcast(Node *expr, Type *ty) {
+Node *newcast(Node *expr, Type *ty) {
   add_type(expr);
 
   Node *nd = calloc(1, sizeof(Node));
@@ -193,7 +199,7 @@ static Node *newadd(Node *left, Node *right, Token *tok)
 
   // ptr + num
   // 指针加法， ptr+1，不是1个字节，而是一个元素的空间，所以需要 *size 操作
-  right = newbinary(ND_MUL, right, newnum(left->ty->base->size, tok), tok);
+  right = newbinary(ND_MUL, right, newlong(left->ty->base->size, tok), tok);
   return newbinary(ND_ADD, left, right, tok);
 }
 
@@ -212,7 +218,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 
   // ptr - num
   if (left->ty->kind == TY_PTR && is_integer(right->ty)) {
-    right = newbinary(ND_MUL, right, newnum(left->ty->base->size, tok), tok);
+    right = newbinary(ND_MUL, right, newlong(left->ty->base->size, tok), tok);
     add_type(right);
     Node *nd = newbinary(ND_SUB, left, right, tok);
     // 节点类型为指针
