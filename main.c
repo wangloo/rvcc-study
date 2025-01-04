@@ -155,6 +155,18 @@ static Node *newvar(Obj *var, Token *tok)
   return nd;
 }
 
+// 新转换
+static Node *newcast(Node *expr, Type *ty) {
+  add_type(expr);
+
+  Node *nd = calloc(1, sizeof(Node));
+  nd->kind = ND_CAST;
+  nd->tok = expr->tok;
+  nd->left = expr; // left表示之前的类型
+  nd->ty = copytype(ty);
+  return nd;
+}
+
 static Node *newadd(Node *left, Node *right, Token *tok)
 {
   // 为左右部添加类型
@@ -295,8 +307,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
-// mul = unary ("*" unary | "/" unary)
-// unary = ("+" | "-" | "&" | "*") unary | postfix
+// mul = cast ("*" cast | "/" cast)
+// cast = "(" typeName ") cast | unary
+// unary = ("+" | "-" | "&" | "*") cast | postfix
 // postfix = primary ("[" expr "]" | "." ident | "->" ident)*
 // primary = "(" "{" stmt+ "}" ")"
 //          | "(" expr ")"
@@ -322,9 +335,11 @@ static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 static Type *union_decl(Token **rest, Token *tok);
+static Node *cast(Token **rest, Token *tok);
 static Node *unary(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
+static Type *typename(Token  **rest, Token *tok);
 
 // declspec = ("void" | "int" | "long" | "short" | "char"
 //             | "typedef"
@@ -932,22 +947,23 @@ static Node *add(Token **rest, Token *tok)
   }
 }
 // 解析乘除
-// mul = primary( "*" primary | "/" primary)
+// mul = cast ("*" cast | "/" cast)
 static Node *mul(Token **rest, Token *tok)
 {
-  Node *nd = unary(&tok, tok);
+  // cast
+  Node *nd = cast(&tok, tok);
 
-  // ("*" primary | "/" primary)
+  // ("*" cast | "/" cast)
   while (1) {
-    // "*" primiary
+    // "*" cast
     if (equal(tok, "*")) {
-      nd = newbinary(ND_MUL, nd, unary(&tok, tok->next), tok);
+      nd = newbinary(ND_MUL, nd, cast(&tok, tok->next), tok);
       continue;
     }
 
-    // "/" primary
+    // "/" cast
     if (equal(tok, "/")) {
-      nd = newbinary(ND_DIV, nd, unary(&tok, tok->next), tok);
+      nd = newbinary(ND_DIV, nd, cast(&tok, tok->next), tok);
       continue;
     }
 
@@ -956,28 +972,46 @@ static Node *mul(Token **rest, Token *tok)
   }
 }
 
-// unary = ("+" | "-" | "&" | "*") unary | primary
+// 解析类型转换
+// cast = "(" typeName ")" cast | unary
+static Node *cast(Token **rest, Token *tok) {
+  // cast = "(" typeName ")" cast
+  if (equal(tok, "(") && is_typename(tok->next)) {
+    Token *start = tok;
+    Type *ty = typename(&tok, tok->next);
+    tok = skip(tok, ")");
+    // 解析嵌套的类型转换
+    Node *nd = newcast(cast(rest, tok), ty);
+    nd->tok = start;
+    return nd;
+  }
+
+  // unary
+  return unary(rest, tok);
+}
+
+// unary = ("+" | "-" | "&" | "*") cast | primary
 static Node *unary(Token **rest, Token *tok)
 {
   Node *nd = NULL;
 
-  // "+" unary
+  // "+" cast
   if (equal(tok, "+")) {
-    return unary(rest, tok->next);
+    return cast(rest, tok->next);
   }
-  // "-" unary
+  // "-" cast
   if (equal(tok, "-")) {
-    nd = newbinary(ND_NEG, NULL, unary(rest, tok->next), tok);
+    nd = newbinary(ND_NEG, NULL, cast(rest, tok->next), tok);
     return nd;
   }
-  // "&" unary
+  // "&" cast
   if (equal(tok, "&")) {
-    nd = newbinary(ND_ADDR, NULL, unary(rest, tok->next), tok);
+    nd = newbinary(ND_ADDR, NULL, cast(rest, tok->next), tok);
     return nd;
   }
-  // "*" unary
+  // "*" cast
   if (equal(tok, "*")) {
-    nd = newbinary(ND_DEREF, NULL, unary(rest, tok->next), tok);
+    nd = newbinary(ND_DEREF, NULL, cast(rest, tok->next), tok);
     return nd;
   }
 

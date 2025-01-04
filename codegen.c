@@ -152,6 +152,58 @@ static int count(void)
   return I++;
 }
 
+// 类型枚举
+enum {I8, I16, I32, I64 };
+
+// 获取类型对应的枚举值
+static int get_typeid(Type *ty) {
+  switch (ty->kind) {
+  case TY_CHAR:
+    return I8;
+  case TY_SHORT:
+    return I16;
+  case TY_INT:
+    return I32;
+  default:
+    return I64;
+  }
+}
+
+// 类型映射表
+// 先逻辑左移N位，再算术右移N位，就实现了将64位有符号数转换为64-N位的有符号数
+static char i64i8[] = "  # 转换为i8类型\n"
+                      "  slli a0, a0, 56\n"
+                      "  srai a0, a0, 56";
+static char i64i16[] = "  # 转换为i16类型\n"
+                       "  slli a0, a0, 48\n"
+                       "  srai a0, a0, 48";
+static char i64i32[] = "  # 转换为i32类型\n"
+                       "  slli a0, a0, 32\n"
+                       "  srai a0, a0, 32";
+static char *castTable[10][10] = {
+    // clang-format off
+    // 被映射到
+    // {i8,  i16,    i32,    i64}
+    {NULL,   NULL,   NULL,   NULL}, // 从i8转换
+    {i64i8,  NULL,   NULL,   NULL}, // 从i16转换
+    {i64i8,  i64i16, NULL,   NULL}, // 从i32转换
+    {i64i8,  i64i16, i64i32, NULL}, // 从i64转换
+    // clang-format on
+};
+
+static void cast(Type *from, Type *to) {
+  if (to->kind == TY_VOID)
+    return;
+
+  // 获取类型的枚举值
+  int t1 = get_typeid(from);
+  int t2 = get_typeid(to);
+  if (castTable[t1][t2]) {
+    println("  # 转换函数");
+    println("%s", castTable[t1][t2]);
+  }
+}
+
 static void gen_expr(Node *nd)
 {
   //.loc 文件编号 行号
@@ -197,6 +249,11 @@ static void gen_expr(Node *nd)
   if (nd->kind == ND_STMT_EXPR) {
     for (Node *n = nd->body; n; n = n->next)
       gen_stmt(n);
+    return;
+  }
+  if (nd->kind == ND_CAST) {
+    gen_expr(nd->left);
+    cast(nd->left->ty, nd->ty);
     return;
   }
   if (nd->kind == ND_FUNCALL) {

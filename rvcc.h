@@ -66,6 +66,7 @@ typedef enum {
   ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
   ND_NUM, // INT NUMBER
+  ND_CAST, // 类型转换
 } NodeKind;
 
 typedef struct Obj Obj;
