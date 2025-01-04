@@ -234,22 +234,24 @@ static void gen_expr(Node *nd)
   // 将结果弹栈到a1
   pop("a1");
 
+  // 是否为long类型或者指针(数组)
+  char *suffix  = nd->left->ty->kind == TY_LONG || nd->left->ty->base ? "" : "w";
   switch (nd->kind) {
   case ND_ADD:
     println("  # a0+a1，结果写入a0");
-    println("  add a0, a0, a1");
+    println("  add%s a0, a0, a1", suffix);
     return;
   case ND_SUB:
     println("  # a0-a1，结果写入a0");
-    println("  sub a0, a0, a1");
+    println("  sub%s a0, a0, a1", suffix);
     return;
   case ND_MUL:
     println("  # a0×a1，结果写入a0");
-    println("  mul a0, a0, a1");
+    println("  mul%s a0, a0, a1", suffix);
     return;
   case ND_DIV:
     println("  # a0÷a1，结果写入a0");
-    println("  div a0, a0, a1");
+    println("  div%s a0, a0, a1", suffix);
     return;
   case ND_EQ:
   case ND_NE:
