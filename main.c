@@ -242,8 +242,9 @@ static Node *newsub(Node *left, Node *right, Token *tok)
 
 static bool is_typename(Token *tok) {
   return equal(tok, "int") || equal(tok, "char") || equal(tok, "short") ||
-         equal(tok, "long") || equal(tok, "void") || equal(tok, "struct") ||
-         equal(tok, "union") || equal(tok, "typedef") || find_typdef(tok);
+         equal(tok, "long") || equal(tok, "void") || equal(tok, "_Bool") ||
+         equal(tok, "struct") || equal(tok, "union") || equal(tok, "typedef") ||
+         find_typdef(tok);
 }
 
 // 新增唯一名称
@@ -294,7 +295,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // compoundStmt = (declaration | stmt*) "}"
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
-// declspec = ("void" | "int" | "long" | "short" | "char"
+// declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
 //             | "typedef"
 //             | structDecl | unionDecl | typedefName)+
 // structDecl = structUnionDecl
@@ -349,21 +350,22 @@ static Node *postfix(Token **rest, Token *tok);
 static Node *primary(Token **rest, Token *tok);
 static Type *typename(Token  **rest, Token *tok);
 
-// declspec = ("void" | "int" | "long" | "short" | "char"
+// declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
 //             | "typedef"
 //             | structDecl | unionDecl | typedefName)+
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
 {
-  // 类型的组合，被表示为例如：LONG+LONG=1<<9
+  // 类型的组合，被表示为例如：LONG+LONG=1<<11
   // 可知 long int 和 int long 是等价的
   enum {
     VOID = 1 << 0,
-    CHAR = 1 << 2,
-    SHORT = 1 << 4,
-    INT = 1 << 6,
-    LONG = 1 << 8,
-    OTHER = 1 << 10,
+    BOOL = 1 << 2,
+    CHAR = 1 << 4,
+    SHORT = 1 << 6,
+    INT = 1 << 8,
+    LONG = 1 << 10,
+    OTHER = 1 << 12,
   };
   Type *ty = TyInt;
   int counter = 0; // 记录类型相加的值
@@ -406,6 +408,9 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
     // "void"
     if (equal(tok, "void"))
       counter += VOID;
+    // "_Bool"
+    else if (equal(tok, "_Bool"))
+      counter += BOOL;
     // "char"
     else if (equal(tok, "char"))
       counter += CHAR;
@@ -425,6 +430,9 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
     switch (counter) {
     case VOID:
       ty = TyVoid;
+      break;
+    case BOOL:
+      ty = TyBool;
       break;
     case CHAR:
       ty = TyChar;

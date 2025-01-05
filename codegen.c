@@ -195,6 +195,12 @@ static void cast(Type *from, Type *to) {
   if (to->kind == TY_VOID)
     return;
 
+  if (to->kind == TY_BOOL) {
+    println("  # 转为bool类型：为0置0，非0置1");
+    println("  snez a0, a0");
+    return;
+  }
+
   // 获取类型的枚举值
   int t1 = get_typeid(from);
   int t2 = get_typeid(to);
