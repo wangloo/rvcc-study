@@ -141,6 +141,7 @@ typedef enum {
   TY_INT, // int 整型
   TY_LONG, // long 长整型
   TY_SHORT, // short 短整型
+  TY_ENUM,  // enum 枚举类型
   TY_PTR, // 指针
   TY_FUNC, // 函数
   TY_ARRAY, // 数组
@@ -190,6 +191,8 @@ Node *newcast(Node *expr, Type *ty);
 Type *pointerto(Type *Base);
 // 函数类型
 Type *functype(Type *ReturnTy);
+// 构造枚举类型
+Type *enumtype(void);
 
 // 判断是否为整型
 bool is_integer(Type *ty);

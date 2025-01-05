@@ -19,7 +19,7 @@ static Type *new_type(TypeKind kind, int size, int align) {
 // 判断Type是否为整数类型
 bool is_integer(Type *ty) {
   return ty->kind == TY_BOOL || ty->kind == TY_CHAR || ty->kind == TY_SHORT ||
-         ty->kind == TY_INT || ty->kind == TY_LONG;
+         ty->kind == TY_INT || ty->kind == TY_LONG || ty->kind == TY_ENUM;
 }
 
 
@@ -47,6 +47,11 @@ Type *functype(Type *returnty)
   ty->kind = TY_FUNC;
   ty->returnty = returnty;
   return ty;
+}
+
+// 构造枚举类型
+Type *enumtype(void) {
+  return new_type(TY_ENUM, 4, 4);
 }
 
 Type *copytype(Type *ty)

@@ -1,14 +1,17 @@
 #include "rvcc.h"
 
-// 局部和全局变量 或是typedef 的域
+// 局部和全局变量 或是typedef, enum常量的域
 typedef struct VarScope VarScope;
 struct VarScope {
   VarScope *next; // 下一个变量域
   char *name;     // 变量域名称
   Obj *var;       // 对应的变量
   Type *typede;   // 别名
+  Type *enumty;   // 枚举的类型
+  int enumval;    // 枚举的值
 };
 
+// 结构体标签，联合体标签，枚举标签的域
 typedef struct TagScope TagScope;
 struct TagScope {
   TagScope *next; // 下一标签域
@@ -21,7 +24,7 @@ typedef struct Scope Scope;
 struct Scope {
   Scope *next;    // 指向上一级的域
 
-  // C有两个域：变量域，结构体标签域
+  // C有两个域：变量（或类型别名）域，结构体（或联合体、枚举）标签域
   TagScope *tags; // 指向当前域内的结构体标签
   VarScope *vars; // 指向当前域内的变量
 };
@@ -244,7 +247,7 @@ static bool is_typename(Token *tok) {
   return equal(tok, "int") || equal(tok, "char") || equal(tok, "short") ||
          equal(tok, "long") || equal(tok, "void") || equal(tok, "_Bool") ||
          equal(tok, "struct") || equal(tok, "union") || equal(tok, "typedef") ||
-         find_typdef(tok);
+         equal(tok, "enum") || find_typdef(tok);
 }
 
 // 新增唯一名称
@@ -298,6 +301,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
 //             | "typedef"
 //             | structDecl | unionDecl | typedefName)+
+//             | enumSpecifier)+
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -335,6 +339,7 @@ static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
+static Type *enum_specifier(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
@@ -352,7 +357,8 @@ static Type *typename(Token  **rest, Token *tok);
 
 // declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
 //             | "typedef"
-//             | structDecl | unionDecl | typedefName)+
+//             | structDecl | unionDecl | typedefName
+//             | enumSpecifier)+
 // declarator specifier
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
 {
@@ -383,7 +389,8 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
 
     // 处理用户定义的关键字
     Type *ty2 = find_typdef(tok);
-    if (equal(tok, "struct") || equal(tok, "union") || ty2) {
+    if (equal(tok, "struct") || equal(tok, "union") || equal(tok, "enum") ||
+        ty2) {
       if (counter)
         break;
 
@@ -393,6 +400,8 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
       } else if (equal(tok, "union")) {
         // unionDecl
         ty = union_decl(&tok, tok->next);
+      } else if (equal(tok, "enum")) {
+        ty = enum_specifier(&tok, tok->next);
       } else {
         // 将类型设为类型别名指向的类型
         ty = ty2;
@@ -1174,12 +1183,20 @@ static Node *primary(Token **rest, Token *tok)
       return funcall(rest, tok);
     } else {
       VarScope *s  = findvar(tok);
-      if (!s || !s->var) {
+      if (!s || (!s->var && !s->enumty)) {
         // 未声明就使用变量，报错
         errorTok(tok, "undefined variable");
       }
+
+      Node *nd;
+      // 是否为变量
+      if (s->var)
+        nd = newvar(s->var, tok);
+      else
+        nd = newnum(s->enumval, tok);
+
       *rest = tok->next;
-      return newvar(s->var, tok);
+      return nd;
     }
   }
   // num
@@ -1212,6 +1229,63 @@ static Node *primary(Token **rest, Token *tok)
   error("unexpected char '%c'\n", tok->val);
   return NULL;
 }
+
+// 获取枚举类型信息
+// enumSpecifier = ident? "{" enumList? "}"
+//              | ident ("{" enumList? "}")?
+// enumList = ident ("=" num)? ("," ident ("=" num)?)*
+static Type *enum_specifier(Token **rest, Token *tok) {
+  Type *ty = enumtype();
+
+  // 读取标签
+  // ident?
+  Token *tag = NULL;
+  if (tok->kind == TK_IDENT) {
+    tag = tok;
+    tok = tok->next;
+  }
+
+  // 处理没有{}的情况
+  if (tag && !equal(tok, "{")) {
+    Type *ty = findtag(tag);
+    if (!ty)
+      errorTok(tag, "unknown enum type");
+    if (ty->kind != TY_ENUM)
+      errorTok(tag, "not an enum tag");
+    *rest = tok;
+    return ty;
+  }
+
+  // "{" enumList? "}"
+  int i = 0;
+  int val = 0;
+  tok = skip(tok, "{");
+  while (!equal(tok, "}")) {
+    if (i++ > 0)
+      tok = skip(tok, ",");
+
+    char *name = get_ident(tok);
+    tok = tok->next;
+
+    if (equal(tok, "=")) {
+      val = tok->next->val;
+      tok = tok->next->next;
+    }
+
+    // 存入枚举常量
+    VarScope *s = push_scope(name);
+    s->enumty = ty;
+    s->enumval = val++;
+  }
+
+  *rest = tok->next;
+  if (tag)
+    push_tagscope(tag, ty);
+  return ty;
+}
+
+
+
 
 
 // structMembers = (declspec declarator ("," declarator)* ";")*
