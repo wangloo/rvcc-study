@@ -280,6 +280,32 @@ static Token *read_string_literal(char *start)
   return tok;
 }
 
+static Token *read_char_literal(char *start) {
+  char *p = start + 1;
+  // 解析字符为 \0 的情况
+  if (*p == '\0')
+    errorAt(start, "unclosed char literal");
+
+  // 解析字符
+  char c;
+  // 转义
+  if (*p == '\\')
+    c = read_escaped_char(&p, p + 1);
+  else
+    c = *p++;
+
+  char *end = strchr(p, '\'');
+  if (!end)
+    errorAt(p, "unclosed char literal");
+
+  // 构造一个NUM的终结符，值为C的数值
+  Token *tok = newtoken(TK_NUM, start);
+  // 长度多一个，存储\0
+  tok->len = end - start + 1;
+  tok->val = c;
+  return tok;
+}
+
 static char *readfile(char *path)
 {
   FILE *fp;
@@ -367,6 +393,14 @@ Token *tokenize(char *filename, char *p)
     // 解析字符串字面量
     if (*p == '"') {
       cur->next = read_string_literal(p);
+      cur = cur->next;
+      p += cur->len;
+      continue;
+    }
+
+    // 解析字符字面量
+    if (*p == '\'') {
+      cur->next = read_char_literal(p);
       cur = cur->next;
       p += cur->len;
       continue;
