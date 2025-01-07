@@ -311,7 +311,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
 // stmt = ("return") expr ";"
-//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
+//        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
@@ -813,7 +813,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
 
 // 解析表达式语句
 // stmt = ("return") expr ";"
-//        | "for" "(" exprStmt expr? ";" expr? ")" stmt
+//        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | expr? ";"
@@ -831,14 +831,23 @@ static Node *stmt(Token **rest, Token *tok)
     *rest = tok;
     return nd;
   }
-  // "for" "(" exprStmt expr? ";" expr? ")" stmt
+  // "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
   if (equal(tok, "for")) {
     Node *nd = newnode(ND_FOR, tok);
     tok = skip(tok->next, "(");
+
+    // 进入for循环域
+    enter_scope();
     // init
     // init的处理比较特殊，for 循环的init是一条statement，
     // 后两个仅仅是语句。不用判空，因为在内部会判断
-    nd->init = expr_stmt(&tok, tok);
+    if (is_typename(tok)) {
+      // 初始化循环变量
+      Type *basety = declspec(&tok, tok, NULL);
+      nd->init = declaration(&tok, tok, basety);
+    } else {
+      nd->init = expr_stmt(&tok, tok);
+    }
     // cond
     if (!equal(tok, ";")) {
       nd->cond = expr(&tok, tok);
@@ -851,6 +860,9 @@ static Node *stmt(Token **rest, Token *tok)
 
     tok = skip(tok, ")");
     nd->then = stmt(&tok, tok);
+
+    // 退出for循环域
+    leave_scope();
     *rest = tok;
     return nd;
   }
