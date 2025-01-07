@@ -332,7 +332,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // mul = cast ("*" cast | "/" cast)
 // cast = "(" typeName ") cast | unary
 // unary = ("+" | "-" | "&" | "*") cast | ("++" | "--") unary | postfix
-// postfix = primary ("[" expr "]" | "." ident | "->" ident)*
+// postfix = primary ("[" expr "]" | "." ident | "->" ident | "++" | "--")*
 // primary = "(" "{" stmt+ "}" ")"
 //          | "(" expr ")"
 //          | ident func-args?
@@ -1159,7 +1159,16 @@ static Node *unary(Token **rest, Token *tok)
   return postfix(rest, tok);
 }
 
-// postfix = primary ("[" expr "]" | "." ident | "->" ident)*
+// 转换 A++ 为 `(typeof A)(A += 1) -1)`
+// Increase Decrease
+static Node *new_inc_dec(Node *nd, Token *tok, int addend) {
+  add_type(nd);
+  return newcast(newadd(to_assign(newadd(nd, newnum(addend, tok), tok)),
+                        newnum(-addend, tok), tok),
+                 nd->ty);
+}
+
+// postfix = primary ("[" expr "]" | "." ident | "->" ident | "++" | "--")*
 static Node *postfix(Token **rest, Token *tok)
 {
   // primary
@@ -1188,6 +1197,19 @@ static Node *postfix(Token **rest, Token *tok)
       nd = newunary(ND_DEREF, nd, tok);
       nd = struct_ref(nd, tok->next);
       tok = tok->next->next;
+      continue;
+    }
+    // "++"
+    if (equal(tok, "++")) {
+      nd = new_inc_dec(nd, tok, 1);
+      tok = tok->next;
+      continue;
+    }
+
+    // "--"
+    if (equal(tok, "--")) {
+      nd = new_inc_dec(nd, tok, -1);
+      tok = tok->next;
       continue;
     }
     *rest = tok;
