@@ -2,6 +2,16 @@
 	"editor.tabSize": 2,
   "editor.insertSpaces": true,
   "editor.renderWhitespace": "trailing", // 提醒行尾的多余空格
-  "files.trimTrailingWhitespace": true, // 保存文件时自动删除行尾的多余空格
+  "files.trimTrailingWhitespace": true,
+  "files.associations": {
+    "array": "cpp",
+    "compare": "cpp",
+    "functional": "cpp",
+    "tuple": "cpp",
+    "type_traits": "cpp",
+    "utility": "cpp",
+    "istream": "cpp",
+    "ostream": "cpp"
+  }, // 保存文件时自动删除行尾的多余空格
 
 }

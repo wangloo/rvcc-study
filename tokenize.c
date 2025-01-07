@@ -136,6 +136,21 @@ static bool iskeyword(Token *tok)
   }
   return false;
 }
+
+// 判断多自己的操作符
+static int read_punct(char *ptr) {
+  // 判断多字节的操作符
+  static char *Kw[] = {
+    "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=", "++", "--"};
+  for (int i = 0; i < sizeof(Kw) / sizeof(*Kw); i++) {
+    if (starts_with(ptr, Kw[i]))
+      return strlen(Kw[i]);
+  }
+
+  // 判断1字节的操作符
+  return ispunct(*ptr) ? 1 : 0;
+}
+
 // 将名为“return”的终结符转为KEYWORD
 static void convert_keywords(Token *tok)
 {
@@ -419,75 +434,13 @@ Token *tokenize(char *filename, char *p)
       continue;
     }
 
-    if (*p == '=' && *(p+1) == '=') {
+    // 解析操作符
+    int punct_len = read_punct(p);
+    if (punct_len) {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '-' && *(p+1) == '>') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '+' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '-' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '*' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '/' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-
-    if (*p == '!' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '<' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (*p == '>' && *(p+1) == '=') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 2;
-      p += 2;
-      continue;
-    }
-    if (ispunct(*p) || *p == ';') {
-      cur->next = newtoken(TK_PUNCT, p);
-      cur = cur->next;
-      cur->len = 1;
-      p++;
+      cur->len = punct_len;
+      p += punct_len;
       continue;
     }
 

@@ -331,7 +331,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // add = mul ("+" mul | "-" mul)
 // mul = cast ("*" cast | "/" cast)
 // cast = "(" typeName ") cast | unary
-// unary = ("+" | "-" | "&" | "*") cast | postfix
+// unary = ("+" | "-" | "&" | "*") cast | ("++" | "--") unary | postfix
 // postfix = primary ("[" expr "]" | "." ident | "->" ident)*
 // primary = "(" "{" stmt+ "}" ")"
 //          | "(" expr ")"
@@ -1121,7 +1121,7 @@ static Node *cast(Token **rest, Token *tok) {
   return unary(rest, tok);
 }
 
-// unary = ("+" | "-" | "&" | "*") cast | primary
+// unary = ("+" | "-" | "&" | "*") cast | ("++" | "--") unary | postfix
 static Node *unary(Token **rest, Token *tok)
 {
   Node *nd = NULL;
@@ -1146,6 +1146,16 @@ static Node *unary(Token **rest, Token *tok)
     return nd;
   }
 
+  // 转换 ++i 为 i+=1
+  // “++” unary
+  if (equal(tok, "++"))
+    return to_assign(newadd(unary(rest, tok->next), newnum(1, tok), tok));
+
+  // 转换--i 为 i-=1
+  if (equal(tok, "--"))
+    return to_assign(newsub(unary(rest, tok->next), newnum(1, tok), tok));
+
+  // postfix
   return postfix(rest, tok);
 }
 
