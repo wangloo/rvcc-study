@@ -433,6 +433,35 @@ Token *tokenize(char *filename, char *p)
       p += 2;
       continue;
     }
+    if (*p == '+' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '-' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '*' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+    if (*p == '/' && *(p+1) == '=') {
+      cur->next = newtoken(TK_PUNCT, p);
+      cur = cur->next;
+      cur->len = 2;
+      p += 2;
+      continue;
+    }
+
     if (*p == '!' && *(p+1) == '=') {
       cur->next = newtoken(TK_PUNCT, p);
       cur = cur->next;

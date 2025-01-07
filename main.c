@@ -138,6 +138,7 @@ static Node *newbinary(NodeKind kind, Node *left, Node *right, Token *tok)
   return nd;
 }
 
+
 // 新建一个节点，不需要孩子
 // 可能通过Node其他成员来维护/访问
 // 比如说 compound_stmt ==> "{"
@@ -146,6 +147,12 @@ static Node *newnode(NodeKind kind, Token *tok)
   return newbinary(kind, NULL, NULL, tok);
 }
 
+// 新建一个单叉树
+static Node *newunary(NodeKind kind, Node *expr, Token *tok) {
+  Node *nd = newnode(kind, tok);
+  nd->right = expr;
+  return nd;
+}
 
 static Node *newnum(int64_t val, Token *tok)
 {
@@ -160,7 +167,8 @@ static Node *newlong(int64_t val, Token *tok) {
   nd->ty = TyLong;
 }
 
-static Node *newvar(Obj *var, Token *tok)
+// 新建一个变量节点
+static Node *new_varnode(Obj *var, Token *tok)
 {
   Node *nd = newbinary(ND_VAR, NULL, NULL, tok);
   nd->var = var;
@@ -752,7 +760,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
       continue;
 
     // 解析"="后面的token
-    Node *left = newvar(var, ty->name);
+    Node *left = new_varnode(var, ty->name);
     // 解析递归赋值语句
     // tok->next 跳过 "="
     Node *right = assign(&tok, tok->next);
@@ -939,8 +947,35 @@ static Node *expr(Token **rest, Token *tok) {
   return nd;
 }
 
+// 转换 A op= B 为 TMP = &A, *TMP = *TMP OP B
+static Node *to_assign(Node *binary) {
+  // A
+  add_type(binary->left);
+  // B
+  add_type(binary->right);
+  Token *tok = binary->tok;
+
+  // TMP
+  Obj *var = new_local("", pointerto(binary->left->ty));
+
+  // TMP = &A
+  Node *expr1 = newbinary(ND_ASSIGN, new_varnode(var, tok),
+                          newunary(ND_ADDR, binary->left, tok), tok);
+
+  // *TMP = *TMP op B
+  Node *expr2 = newbinary(
+      ND_ASSIGN, newunary(ND_DEREF, new_varnode(var, tok), tok),
+      newbinary(binary->kind, newunary(ND_DEREF, new_varnode(var, tok), tok),
+                binary->right, tok),
+      tok);
+  // TMP = &A, *TMPO = &TMP op B
+  return newbinary(ND_COMMA, expr1, expr2, tok);
+}
+
+
 // 解析赋值
-// assign = equality ("=" assign)?
+// assign = equality (assignOp assign)?
+// assignOp = "=" | "+=" | "-=" | "*=" | "/="
 static Node *assign(Token **rest, Token *tok)
 {
   Node *nd = equality(&tok, tok);
@@ -948,8 +983,25 @@ static Node *assign(Token **rest, Token *tok)
   // 可能存在递归赋值，如a=b=1
   // ("=" assign)
   if (equal(tok, "=")) {
-    nd = newbinary(ND_ASSIGN, nd, assign(&tok, tok->next), tok);
+    nd = newbinary(ND_ASSIGN, nd, assign(rest, tok->next), tok);
+    return nd;
   }
+
+  // ("+=" assign)
+  if (equal(tok, "+="))
+    return to_assign(newadd(nd, assign(rest, tok->next), tok));
+
+  // ("-=" assign)
+  if (equal(tok, "-="))
+    return to_assign(newsub(nd, assign(rest, tok->next), tok));
+
+  // ("*=" assign)
+  if (equal(tok, "*="))
+    return to_assign(newbinary(ND_MUL, nd, assign(rest, tok->next), tok));
+
+  // ("/=" assign)
+  if (equal(tok, "/="))
+    return to_assign(newbinary(ND_DIV, nd, assign(rest, tok->next), tok));
 
   *rest = tok;
   return nd;
@@ -1080,17 +1132,17 @@ static Node *unary(Token **rest, Token *tok)
   }
   // "-" cast
   if (equal(tok, "-")) {
-    nd = newbinary(ND_NEG, NULL, cast(rest, tok->next), tok);
+    nd = newunary(ND_NEG, cast(rest, tok->next), tok);
     return nd;
   }
   // "&" cast
   if (equal(tok, "&")) {
-    nd = newbinary(ND_ADDR, NULL, cast(rest, tok->next), tok);
+    nd = newunary(ND_ADDR, cast(rest, tok->next), tok);
     return nd;
   }
   // "*" cast
   if (equal(tok, "*")) {
-    nd = newbinary(ND_DEREF, NULL, cast(rest, tok->next), tok);
+    nd = newunary(ND_DEREF, cast(rest, tok->next), tok);
     return nd;
   }
 
@@ -1110,7 +1162,7 @@ static Node *postfix(Token **rest, Token *tok)
     if (equal(tok, "[")) {
       Node *idx = expr(&tok, tok->next);
       tok = skip(tok, "]");
-      nd = newbinary(ND_DEREF, NULL, newadd(nd, idx, tok), tok);
+      nd = newunary(ND_DEREF, newadd(nd, idx, tok), tok);
       continue;
     }
 
@@ -1123,7 +1175,7 @@ static Node *postfix(Token **rest, Token *tok)
     // "->" ident
     if (equal(tok, "->")) {
       // x->y 等价于 (*x).y
-      nd = newbinary(ND_DEREF, NULL, nd, tok);
+      nd = newunary(ND_DEREF, nd, tok);
       nd = struct_ref(nd, tok->next);
       tok = tok->next->next;
       continue;
@@ -1212,7 +1264,7 @@ static Node *primary(Token **rest, Token *tok)
       Node *nd;
       // 是否为变量
       if (s->var)
-        nd = newvar(s->var, tok);
+        nd = new_varnode(s->var, tok);
       else
         nd = newnum(s->enumval, tok);
 
@@ -1229,7 +1281,7 @@ static Node *primary(Token **rest, Token *tok)
   if (tok->kind == TK_STR) {
     Obj *var = new_string_literal(tok->str, tok->ty);
     *rest = tok->next;
-    return newvar(var, tok);
+    return new_varnode(var, tok);
   }
 
   // "sizeof" "(" typeName ")"
