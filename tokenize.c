@@ -249,6 +249,38 @@ static int read_escaped_char(char **newpos, char *p)
   }
 }
 
+static Token *read_int_literal(char *start) {
+  char *p = start;
+
+  // 读取2、8、10、16进制
+  // 默认为10进制
+  int base = 10;
+
+  if (!strncasecmp(p, "0x", 2) && isxdigit(p[2])) {
+    // 16进制
+    p += 2;
+    base = 16;
+  } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
+    // 2进制
+    p += 2;
+    base = 2;
+  } else if (*p == '0') {
+    // 8进制
+    base = 8;
+  }
+
+  // 将字符串转换为base进制的数字
+  long val = strtoul(p, &p, base);
+  if (isalnum(*p))
+    errorAt(p, "invalid digit");
+
+  // 构造NUM的终结符
+  Token *tok = newtoken(TK_NUM, start);
+  tok->val = val;
+  tok->len = p - start;
+  return tok;
+}
+
 
 
 // 读取到字符串字面量结尾
@@ -397,11 +429,10 @@ Token *tokenize(char *filename, char *p)
       continue;
     }
     if (isdigit(*p)) {
-      cur->next = newtoken(TK_NUM, p);
+      // 读取数字字面量
+      cur->next = read_int_literal(p);
       cur = cur->next;
-      const char *oldp = p;
-      cur->val = strtol(p, &p, 10);
-      cur->len = p - oldp;
+      p += cur->len;
       continue;
     }
 
