@@ -32,6 +32,7 @@ struct Scope {
 // 变量属性
 typedef struct {
   bool is_typedef; // 是否为类型别名
+  bool is_static;  // 是否为文件域内
 } VarAttr;
 
 // 在解析时，全部的变量实例都被累加到这个列表里。
@@ -247,7 +248,7 @@ static bool is_typename(Token *tok) {
   return equal(tok, "int") || equal(tok, "char") || equal(tok, "short") ||
          equal(tok, "long") || equal(tok, "void") || equal(tok, "_Bool") ||
          equal(tok, "struct") || equal(tok, "union") || equal(tok, "typedef") ||
-         equal(tok, "enum") || find_typdef(tok);
+         equal(tok, "enum") || equal(tok, "static") || find_typdef(tok);
 }
 
 // 新增唯一名称
@@ -299,7 +300,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // declaration =
 //        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
 // declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
-//             | "typedef"
+//             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName)+
 //             | enumSpecifier)+
 // structDecl = structUnionDecl
@@ -334,7 +335,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // typeName = declspec abstractDeclarator
 // abstractDeclarator = "*"* ("(" abstractDeclarator ")")? typeSuffix
 // funcall = ident "(" (assign ("," assign)*)? ")"
-static Token *function(Token *tok, Type *base);
+static Token *function(Token *tok, Type *base, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
@@ -356,7 +357,7 @@ static Node *primary(Token **rest, Token *tok);
 static Type *typename(Token  **rest, Token *tok);
 
 // declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
-//             | "typedef"
+//             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName
 //             | enumSpecifier)+
 // declarator specifier
@@ -378,11 +379,18 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr)
 
   // 遍历所有类型的 tok
   while (is_typename(tok)) {
-    // 处理typedef 关键字
-    if (equal(tok, "typedef")) {
+    // 处理typedef 或 static 关键字
+    if (equal(tok, "typedef") || equal(tok, "static")) {
       if (!attr)
         errorTok(tok, "storage class specifier is not allowed in this context");
-      attr->is_typedef = true;
+      if (equal(tok, "typedef"))
+        attr->is_typedef = true;
+      else
+        attr->is_static = true;
+
+      // typedef 和 static 不应一起使用
+      if (attr->is_static && attr->is_typedef)
+        errorTok(tok, "typedef and static may not be used together");
       tok = tok->next;
       continue;
     }
@@ -644,7 +652,7 @@ Obj *parse(Token **rest, Token *tok)
 
     // 函数
     if (is_function(tok)) {
-      tok = function(tok, basety);
+      tok = function(tok, basety, &attr);
       continue;
     }
 
@@ -667,13 +675,14 @@ static void create_param_lvars(Type *param)
 }
 
 // functionDefinition = declspec declarator (";" | "{" compoundStmt)
-static Token *function(Token *tok, Type *base)
+static Token *function(Token *tok, Type *base, VarAttr *attr)
 {
   Type *ty = declarator(&tok, tok, base);
 
   Obj *fn = new_global(get_ident(ty->name), ty);
   fn->is_function = true;
   fn->is_definition = !consume(&tok, tok, ";");
+  fn->is_static = attr->is_static;
 
   // 判断是否没有函数定义
   if (!fn->is_definition)

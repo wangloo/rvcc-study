@@ -117,6 +117,7 @@ typedef struct Obj {
   // 函数 或者 全局变量
   bool is_function;
   bool is_definition; // 函数定义/声明
+  bool is_static;    // 是否为文件域内
 
   // 全局变量
   char *initdata;

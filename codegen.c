@@ -477,8 +477,13 @@ static void emit_text(Obj *prog) {
     if (!fn->is_function || !fn->is_definition)
       continue;
 
-    println("  # 定义全局%s段", fn->name);
-    println("  .globl %s", fn->name);
+    if (fn->is_static) {
+      println("\n  # 定义局部%s函数", fn->name);
+      println("  .local %s", fn->name);
+    } else {
+      println("\n  # 定义全局%s函数", fn->name);
+      println("  .globl %s", fn->name);
+    }
     println("  # 代码段标签");
     println("  .text");
     println("\n# =====程序开始===============");
