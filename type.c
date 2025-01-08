@@ -125,6 +125,10 @@ void add_type(Node *nd)
     //  将类型设置为int
     nd->ty = TyInt;
     return;
+  case ND_BITNO:
+    // 将节点类型设置为 右部的类型
+    nd->ty = nd->right->ty;
+    return;
   case ND_NEG: {
     // 对右部进行转换
     Type *ty = get_common_type(TyInt, nd->right->ty);
