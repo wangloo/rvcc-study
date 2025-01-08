@@ -329,7 +329,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // assign = equality ("=" assign)?
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
-// mul = cast ("*" cast | "/" cast)
+// mul = cast ("*" cast | "/" cast | "%" cast)
 // cast = "(" typeName ") cast | unary
 // unary = ("+" | "-" | "&" | "*" | "!" | "~") cast | ("++" | "--") unary | postfix
 // postfix = primary ("[" expr "]" | "." ident | "->" ident | "++" | "--")*
@@ -975,7 +975,7 @@ static Node *to_assign(Node *binary) {
 
 // 解析赋值
 // assign = equality (assignOp assign)?
-// assignOp = "=" | "+=" | "-=" | "*=" | "/="
+// assignOp = "=" | "+=" | "-=" | "*=" | "/=" | "%="
 static Node *assign(Token **rest, Token *tok)
 {
   Node *nd = equality(&tok, tok);
@@ -1002,6 +1002,10 @@ static Node *assign(Token **rest, Token *tok)
   // ("/=" assign)
   if (equal(tok, "/="))
     return to_assign(newbinary(ND_DIV, nd, assign(rest, tok->next), tok));
+
+  // ("%=" assign)
+  if (equal(tok, "%="))
+    return to_assign(newbinary(ND_MOD, nd, assign(rest, tok->next), tok));
 
   *rest = tok;
   return nd;
@@ -1078,23 +1082,30 @@ static Node *add(Token **rest, Token *tok)
   }
 }
 // 解析乘除
-// mul = cast ("*" cast | "/" cast)
-static Node *mul(Token **rest, Token *tok)
-{
+// mul = cast ("*" cast | "/" cast | "%" cast)
+static Node *mul(Token **rest, Token *tok) {
   // cast
   Node *nd = cast(&tok, tok);
 
   // ("*" cast | "/" cast)
   while (1) {
+    Token *start = tok;
+
     // "*" cast
     if (equal(tok, "*")) {
-      nd = newbinary(ND_MUL, nd, cast(&tok, tok->next), tok);
+      nd = newbinary(ND_MUL, nd, cast(&tok, tok->next), start);
       continue;
     }
 
     // "/" cast
     if (equal(tok, "/")) {
-      nd = newbinary(ND_DIV, nd, cast(&tok, tok->next), tok);
+      nd = newbinary(ND_DIV, nd, cast(&tok, tok->next), start);
+      continue;
+    }
+
+    // "%" cast
+    if (equal(tok, "%")) {
+      nd = newbinary(ND_MOD, nd, cast(&tok, tok->next), start);
       continue;
     }
 

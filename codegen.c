@@ -267,6 +267,7 @@ static void gen_expr(Node *nd)
     store(nd->ty);
     return;
   }
+
   // 语句表达式
   if (nd->kind == ND_STMT_EXPR) {
     for (Node *n = nd->body; n; n = n->next)
@@ -331,6 +332,10 @@ static void gen_expr(Node *nd)
   case ND_DIV:
     println("  # a0÷a1，结果写入a0");
     println("  div%s a0, a0, a1", suffix);
+    return;
+  case ND_MOD:
+    println("  # a0%%a1, 结果写入a0");
+    println("  rem%s a0, a0, a1", suffix);
     return;
   case ND_EQ:
   case ND_NE:

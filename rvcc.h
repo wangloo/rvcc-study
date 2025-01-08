@@ -61,6 +61,7 @@ typedef enum {
   ND_ADDR,      // 取地址 &
   ND_DEREF,     // 解引用 *
   ND_NOT,       // ! 非
+  ND_MOD,       // % 取余
   ND_BITNO,     // 按位取反
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
