@@ -165,6 +165,7 @@ static Node *newlong(int64_t val, Token *tok) {
   Node *nd = newnode(ND_NUM, tok);
   nd->val = val;
   nd->ty = TyLong;
+  return nd;
 }
 
 // 新建一个变量节点
@@ -326,7 +327,11 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
 // expr = assign ("," expr)?
-// assign = equality ("=" assign)?
+// assign = bitOr (assignOp assign)?
+// bitOr = BitXor ("|" bitXor)*
+// bitXor = BitAnd ("^" bitAnd)*
+// bitAnd = equality ("&" equality)*
+// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
 // add = mul ("+" mul | "-" mul)
 // mul = cast ("*" cast | "/" cast | "%" cast)
@@ -353,6 +358,9 @@ static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
+static Node *bit_or(Token **rest, Token *tok);
+static Node *bit_xor(Token **rest, Token *tok);
+static Node *bit_and(Token **rest, Token *tok);
 static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
@@ -974,11 +982,11 @@ static Node *to_assign(Node *binary) {
 
 
 // 解析赋值
-// assign = equality (assignOp assign)?
-// assignOp = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+// assign = bitOr (assignOp assign)?
+// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 static Node *assign(Token **rest, Token *tok)
 {
-  Node *nd = equality(&tok, tok);
+  Node *nd = bit_or(&tok, tok);
 
   // 可能存在递归赋值，如a=b=1
   // ("=" assign)
@@ -1006,10 +1014,55 @@ static Node *assign(Token **rest, Token *tok)
   // ("%=" assign)
   if (equal(tok, "%="))
     return to_assign(newbinary(ND_MOD, nd, assign(rest, tok->next), tok));
+  
+  // ("&=" assign)
+  if (equal(tok, "&="))
+    return to_assign(newbinary(ND_BITAND, nd, assign(rest, tok->next), tok));
+
+  // ("|=" assign)
+  if (equal(tok, "|="))
+    return to_assign(newbinary(ND_BITOR, nd, assign(rest, tok->next), tok));
+
+  // ("^=" assign)
+  if (equal(tok, "^="))
+    return to_assign(newbinary(ND_BITXOR, nd, assign(rest, tok->next), tok));
 
   *rest = tok;
   return nd;
 }
+
+// 按位或
+// bitOr = BitXor ("|" bitXor)*
+static Node *bit_or(Token **rest, Token *tok) {
+  Node *nd = bit_xor(&tok, tok);
+  while (equal(tok, "|")) {
+    Token *start = tok;
+    nd = newbinary(ND_BITOR, nd, bit_xor(&tok, tok->next), start);
+  }
+  *rest = tok;
+  return nd;
+}
+// bitXor = BitAnd ("^" bitAnd)*
+static Node *bit_xor(Token **rest, Token *tok) {
+  Node *nd = bit_and(&tok, tok);
+  while (equal(tok, "^")) {
+    Token *start = tok;
+    nd = newbinary(ND_BITXOR, nd, bit_and(&tok, tok->next), start);
+  }
+  *rest = tok;
+  return nd;
+}
+// bitAnd = equality ("&" equality)*
+static Node *bit_and(Token **rest, Token *tok) {
+  Node *nd = equality(&tok, tok);
+  while (equal(tok, "&")) {
+    Token *start = tok;
+    nd = newbinary(ND_BITAND, nd, equality(&tok, tok->next), start);
+  }
+  *rest = tok;
+  return nd;
+}
+
 
 // 解析条件运算符
 // equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
