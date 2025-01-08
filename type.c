@@ -121,6 +121,10 @@ void add_type(Node *nd)
     usual_arith_conv(&nd->left, &nd->right);
     nd->ty = nd->right->ty;
     return;
+  case ND_NOT:
+    //  将类型设置为int
+    nd->ty = TyInt;
+    return;
   case ND_NEG: {
     // 对右部进行转换
     Type *ty = get_common_type(TyInt, nd->right->ty);

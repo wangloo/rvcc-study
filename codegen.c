@@ -231,6 +231,14 @@ static void gen_expr(Node *nd)
     load(nd->ty);
     return;
   }
+  // 非运算
+  if (nd->kind == ND_NOT) {
+    gen_expr(nd->right);
+    println("  # 非运算");
+    // a0=0则置1，否则置0
+    println("  seqz a0, a0");
+    return;
+  }
   // 逗号
   if (nd->kind == ND_COMMA) {
     gen_expr(nd->left);
