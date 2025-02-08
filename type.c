@@ -126,6 +126,8 @@ void add_type(Node *nd)
     nd->ty = nd->right->ty;
     return;
   case ND_NOT:
+  case ND_LOGAND:
+  case ND_LOGOR:
     //  将类型设置为int
     nd->ty = TyInt;
     return;

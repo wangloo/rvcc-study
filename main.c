@@ -327,7 +327,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
 // expr = assign ("," expr)?
-// assign = bitOr (assignOp assign)?
+// assign = logOr (assignOp assign)?
+// logOr = logAnd ("||" logAnd)*
+// logAnd = bitOr ("&&" bitOr)*
 // bitOr = BitXor ("|" bitXor)*
 // bitXor = BitAnd ("^" bitAnd)*
 // bitAnd = equality ("&" equality)*
@@ -358,6 +360,8 @@ static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
+static Node *log_or(Token **rest, Token *tok);
+static Node *log_and(Token **rest, Token *tok);
 static Node *bit_or(Token **rest, Token *tok);
 static Node *bit_xor(Token **rest, Token *tok);
 static Node *bit_and(Token **rest, Token *tok);
@@ -982,11 +986,11 @@ static Node *to_assign(Node *binary) {
 
 
 // 解析赋值
-// assign = bitOr (assignOp assign)?
+// assign = logOr (assignOp assign)?
 // assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 static Node *assign(Token **rest, Token *tok)
 {
-  Node *nd = bit_or(&tok, tok);
+  Node *nd = log_or(&tok, tok);
 
   // 可能存在递归赋值，如a=b=1
   // ("=" assign)
@@ -1014,7 +1018,7 @@ static Node *assign(Token **rest, Token *tok)
   // ("%=" assign)
   if (equal(tok, "%="))
     return to_assign(newbinary(ND_MOD, nd, assign(rest, tok->next), tok));
-  
+
   // ("&=" assign)
   if (equal(tok, "&="))
     return to_assign(newbinary(ND_BITAND, nd, assign(rest, tok->next), tok));
@@ -1030,6 +1034,30 @@ static Node *assign(Token **rest, Token *tok)
   *rest = tok;
   return nd;
 }
+// 逻辑或
+// logOr = logAnd ("||" logAnd)*
+static Node *log_or(Token **rest, Token *tok) {
+  Node *nd = log_and(&tok, tok);
+  while (equal(tok, "||")) {
+    Token *start = tok;
+    nd = newbinary(ND_LOGOR, nd, log_and(&tok, tok->next), start);
+  }
+  *rest = tok;
+  return nd;
+}
+
+// 逻辑与
+// logAnd = bitOr ("&&" bitOr)*
+static Node *log_and(Token **rest, Token *tok) {
+  Node *nd = bit_or(&tok, tok);
+  while (equal(tok, "&&")) {
+    Token *start = tok;
+    nd = newbinary(ND_LOGAND, nd, bit_or(&tok, tok->next), start);
+  }
+  *rest = tok;
+  return nd;
+}
+
 
 // 按位或
 // bitOr = BitXor ("|" bitXor)*

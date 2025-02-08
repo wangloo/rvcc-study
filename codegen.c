@@ -337,6 +337,40 @@ static void gen_expr(Node *nd)
     println("  # a0%%a1, 结果写入a0");
     println("  rem%s a0, a0, a1", suffix);
     return;
+  case ND_LOGAND: {
+    int c = count();
+    println("\n# =====逻辑与%d===============", c);
+    gen_expr(nd->left);
+    // 判断是否为短路操作
+    println("  # 左部短路操作判断，为0则跳转");
+    println("  beqz a0, .L.false.%d", c);
+    gen_expr(nd->right);
+    println("  # 右部判断，为0则跳转");
+    println("  beqz a0, .L.false.%d", c);
+    println("  li a0, 1");
+    println("  j .L.end.%d", c);
+    println(".L.false.%d:", c);
+    println("  li a0, 0");
+    println(".L.end.%d:", c);
+    return;
+  }
+  case ND_LOGOR: {
+    int c = count();
+    println("\n# =====逻辑或%d===============", c);
+    gen_expr(nd->left);
+    // 判断是否为短路操作
+    println("  # 左部短路操作判断，不为0则跳转");
+    println("  bnez a0, .L.true.%d", c);
+    gen_expr(nd->right);
+    println("  # 右部判断，不为0则跳转");
+    println("  bnez a0, .L.true.%d", c);
+    println("  li a0, 0");
+    println("  j .L.end.%d", c);
+    println(".L.true.%d:", c);
+    println("  li a0, 1");
+    println(".L.end.%d:", c);
+    return;
+  }
   case ND_BITAND: // & a0=a0&a1
     println("  # a0&a1，结果写入a0");
     println("  and a0, a0, a1");
