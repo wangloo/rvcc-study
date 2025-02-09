@@ -316,7 +316,8 @@ static Type *struct_decl(Token **rest, Token *tok);
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
 // declarator = "*"* ("(" declarator ")" | ident) typeSuffix
-// typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
+// typeSuffix = "(" funcParams | "[" arrayDimensions | ε
+// arrayDimensions = num? "]" typesuffix
 // funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
 // stmt = ("return") expr ";"
@@ -356,6 +357,7 @@ static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Type *enum_specifier(Token **rest, Token *tok);
+static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
@@ -533,23 +535,33 @@ static bool is_function(Token *tok)
   return ty->kind == TY_FUNC;
 }
 
-// typeSuffix = "(" funcParams | "[" num "]" typeSuffix | ε
-static Type *type_suffix(Token **rest, Token *tok, Type *ty)
-{
+
+// arrayDimensions = num? "]" typeSuffix
+static Type *array_dimensions(Token **rest, Token *tok, Type *ty) {
+  // "]" 无数组维度的 "[]"
+  if (equal(tok, "]")) {
+    ty = type_suffix(rest, tok->next, ty);
+    return arrayof(ty, -1);
+  }
+
+  // 有数组维度的情况
+  if (tok->kind != TK_NUM)
+    errorTok(tok, "expected a numer");
+  int sz = tok->val;
+  tok = skip(tok->next, "]");
+  ty = type_suffix(rest, tok, ty);
+  return arrayof(ty, sz);
+}
+
+// typeSuffix = "(" funcParams | "[" arrayDimensions | ε
+static Type *type_suffix(Token **rest, Token *tok, Type *ty) {
   // "(" funcParams
   if (equal(tok, "(")) {
     return func_params(rest, tok->next, ty);
   }
-  // "[" num "]"
-  if (equal(tok, "[")) {
-    tok = tok->next;
-    if (tok->kind != TK_NUM)
-      errorTok(tok, "expected a number");
-    int sz = tok->val;
-    tok = skip(tok->next, "]");
-    ty = type_suffix(rest, tok, ty);
-    return arrayof(ty, sz);
-  }
+  // "[" arrayDimensions
+  if (equal(tok, "["))
+    return array_dimensions(rest, tok->next, ty);
   // ε
   *rest = tok;
   return ty;
@@ -763,6 +775,8 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
 
     // declarator
     Type *ty = declarator(&tok, tok, basety);
+    if (ty->size < 0)
+      errorTok(tok, "variable has incomplete type");
     if (ty->kind == TY_VOID)
       errorTok(tok, "variable declared void");
     Obj *var = new_local(get_ident(ty->name), ty);
