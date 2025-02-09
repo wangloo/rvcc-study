@@ -1553,23 +1553,37 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
     tok = tok->next;
   }
 
+  // 构造不完整结构体
   if (tag && !equal(tok, "{")) {
-    Type *ty = findtag(tag);
-    if (!ty)
-      errorTok(tok, "unknown struct type");
     *rest = tok;
+    Type *ty = findtag(tag);
+    if (ty)
+      return ty;
+
+    ty = structtype();
+    ty->size = -1;
+    push_tagscope(tag, ty);
     return ty;
   }
 
-  // 构造一个结构体
-  Type *ty = calloc(1, sizeof(Type));
-  ty->kind = TY_STRUCT;
-  struct_members(rest, tok->next, ty);
-  ty->align = 1;
+  // ("{" structMembers)?
+  tok = skip(tok, "{");
 
+  // 构造一个结构体
+  Type *ty = structtype();
+  struct_members(rest, tok, ty);
+
+  // 如果是重复定义，就覆盖之前的定义
   // 如果有名就注册结构体类型
-  if (tag)
+  if (tag) {
+    for (TagScope *s = Scp->tags; s; s = s->next) {
+      if (equal(tag, s->name)) {
+        *s->ty = *ty;
+        return s->ty;
+      }
+    }
     push_tagscope(tag, ty);
+  }
   return ty;
 }
 

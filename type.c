@@ -54,6 +54,11 @@ Type *enumtype(void) {
   return new_type(TY_ENUM, 4, 4);
 }
 
+// 构造结构体类型
+Type *structtype(void) {
+  return new_type(TY_STRUCT, 0, 1);
+}
+
 Type *copytype(Type *ty)
 {
   Type *ret = calloc(1, sizeof(Type));

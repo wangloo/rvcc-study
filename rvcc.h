@@ -203,6 +203,8 @@ Type *pointerto(Type *Base);
 Type *functype(Type *ReturnTy);
 // 构造枚举类型
 Type *enumtype(void);
+// 结构体类型
+Type *structtype(void);
 
 // 判断是否为整型
 bool is_integer(Type *ty);
