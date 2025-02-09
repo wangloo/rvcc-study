@@ -98,6 +98,9 @@ typedef struct Node {
   struct Node *body; // 代码块 或 语句表达式
   int64_t val;       // 存储ND_NUM种类的值
 
+  // "break"标签
+  char *brk_label;
+
   // goto和标签语句
   char *label;
   char *unique_label;

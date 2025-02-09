@@ -440,8 +440,8 @@ static void gen_stmt(Node *nd)
       // 生成条件循环语句
       gen_expr(nd->cond);
       // 判断结果是否为0，为0则跳转到结束部分
-      println("  # 若a0为0，则跳转到循环%d的.L.end.%d段", c, c);
-      println("  beqz a0, .L.end.%d", c);
+      println("  # 若a0为0，则跳转到循环%d的%s段", c, nd->brk_label);
+      println("  beqz a0, %s", nd->brk_label);
     }
     // 生成循环体语句
     println("\n# Then语句%d", c);
@@ -454,7 +454,8 @@ static void gen_stmt(Node *nd)
     // 跳转到循环头部
     println("  j .L.begin.%d", c);
     // 输出循环尾部标签
-    println(".L.end.%d:", c);
+    println("\n# 循环%d的%s段标签", c, nd->brk_label);
+    println("%s:", nd->brk_label);
     return;
   }
   if (nd->kind == ND_IF) {
