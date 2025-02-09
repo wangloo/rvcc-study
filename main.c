@@ -39,6 +39,10 @@ typedef struct {
 Obj *Locals;  // 局部变量
 Obj *Globals; // 全局变量
 
+// 当前函数内的goto和标签列表
+static Node *Gotos;
+static Node *Labels;
+
 // 所有域的链表
 static Scope *Scp = &(Scope){};
 // 指向当前正在解析的函数
@@ -324,6 +328,8 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | "goto" ident ";"
+//        | "ident ":" stmt
 //        | expr? ";"
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
@@ -714,6 +720,26 @@ static void create_param_lvars(Type *param)
   }
 }
 
+// 匹配goto和标签
+// 因为标签可能会出现在goto后面，所以要在解析完函数后再进行goto和标签的解析
+static void resolve_gotolabels(void) {
+  // 遍历使goto对应上label
+  for (Node *x = Gotos; x; x = x->goto_next) {
+    for (Node *y = Labels; y; y = y->goto_next) {
+      if (!strcmp(x->label, y->label)) {
+        x->unique_label = y->unique_label;
+        break;
+      }
+    }
+
+    if (x->unique_label == NULL)
+      errorTok(x->tok->next, "use of undeclared label");
+  }
+
+  Gotos = NULL;
+  Labels = NULL;
+}
+
 // functionDefinition = declspec declarator (";" | "{" compoundStmt)
 static Token *function(Token *tok, Type *base, VarAttr *attr)
 {
@@ -747,6 +773,9 @@ static Token *function(Token *tok, Type *base, VarAttr *attr)
   fn->locals = Locals;
   // 结束当前域
   leave_scope();
+
+  // 处理goto和标签
+  resolve_gotolabels();
   return tok;
 }
 
@@ -858,6 +887,8 @@ static Node *compound_stmt(Token **rest, Token *tok)
 //        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | "goto" ident ";"
+//        | "ident ":" stmt
 //        | expr? ";"
 //        | "{" compoundStmt
 static Node *stmt(Token **rest, Token *tok)
@@ -920,6 +951,28 @@ static Node *stmt(Token **rest, Token *tok)
       nd->els = stmt(&tok, tok->next);
     }
     *rest = tok;
+    return nd;
+  }
+
+  // "goto" ident ";"
+  if (equal(tok, "goto")) {
+    Node *nd = newnode(ND_GOTO, tok);
+    nd->label = get_ident(tok->next);
+    // 将nd同时存入Gotos，最后用于解析uniqueue_label
+    nd->goto_next = Gotos;
+    Gotos = nd;
+    *rest = skip(tok->next->next, ";");
+    return nd;
+  }
+
+  // ident ":" stmt
+  if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
+    Node *nd = newnode(ND_LABEL, tok);
+    nd->label = strndup(tok->loc, tok->len);
+    nd->unique_label = new_unique_name();
+    nd->right = stmt(rest, tok->next->next);
+    nd->goto_next = Labels;
+    Labels = nd;
     return nd;
   }
 

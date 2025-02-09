@@ -423,7 +423,7 @@ static void gen_stmt(Node *nd)
   println(" .loc 1 %d", nd->tok->lineno);
 
   if (nd->kind == ND_FOR) {
-    // 代码段技术
+    // 代码段计数
     int c = count();
     println("\n# =====循环语句%d===============", c);
     // 生成初始化语句
@@ -484,6 +484,17 @@ static void gen_stmt(Node *nd)
     println("\n# 分支%d的.L.end.%d段标签", c, c);
     println(".L.end.%d:", c);
 
+    return;
+  }
+  // goto语句
+  if (nd->kind == ND_GOTO) {
+    println("  j %s", nd->unique_label);
+    return;
+  }
+  // 标签语句
+  if (nd->kind == ND_LABEL) {
+    println("%s:", nd->unique_label);
+    gen_stmt(nd->right);
     return;
   }
   if (nd->kind == ND_BLOCK) {

@@ -71,6 +71,8 @@ typedef enum {
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
   ND_FOR,    // "for" 循环
+  ND_GOTO,   // goto, 直接跳转语句
+  ND_LABEL,  // 标签语句
   ND_FUNCALL, // 函数调用
   ND_BLOCK,  // 代码块（花括号）
   ND_VAR, // 变量
@@ -95,6 +97,11 @@ typedef struct Node {
   Obj *var;          // 存储ND_VAL种类的变量
   struct Node *body; // 代码块 或 语句表达式
   int64_t val;       // 存储ND_NUM种类的值
+
+  // goto和标签语句
+  char *label;
+  char *unique_label;
+  struct Node *goto_next;
 
   // 结构体成员访问
   Member *mem;
