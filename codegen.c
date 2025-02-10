@@ -231,6 +231,21 @@ static void gen_expr(Node *nd)
     load(nd->ty);
     return;
   }
+  // 条件运算符
+  if (nd->kind == ND_COND) {
+    int c = count();
+    println("\n# =====条件运算符%d===========", c);
+    gen_expr(nd->cond);
+    println("  # 条件判断，为0则跳转");
+    println("  beqz a0, .L.else.%d", c);
+    gen_expr(nd->then);
+    println("  # 跳转到条件运算符结尾部分");
+    println("  j .L.end.%d", c);
+    println(".L.else.%d:", c);
+    gen_expr(nd->els);
+    println(".L.end.%d:", c);
+    return;
+  }
   // 非运算
   if (nd->kind == ND_NOT) {
     gen_expr(nd->right);

@@ -346,7 +346,8 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
 // expr = assign ("," expr)?
-// assign = logOr (assignOp assign)?
+// assign = conditional (assignOp assign)?
+// conditional = logOr ("?" expr ":" conditional)?
 // logOr = logAnd ("||" logAnd)*
 // logAnd = bitOr ("&&" bitOr)*
 // bitOr = BitXor ("|" bitXor)*
@@ -381,6 +382,7 @@ static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
+static Node *conditional(Token **rest, Token *tok);
 static Node *log_or(Token **rest, Token *tok);
 static Node *log_and(Token **rest, Token *tok);
 static Node *bit_or(Token **rest, Token *tok);
@@ -1189,11 +1191,11 @@ static Node *to_assign(Node *binary) {
 
 
 // 解析赋值
-// assign = logOr (assignOp assign)?
+// assign = conditionnal (assignOp assign)?
 // assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
 static Node *assign(Token **rest, Token *tok)
 {
-  Node *nd = log_or(&tok, tok);
+  Node *nd = conditional(&tok, tok);
 
   // 可能存在递归赋值，如a=b=1
   // ("=" assign)
@@ -1243,6 +1245,29 @@ static Node *assign(Token **rest, Token *tok)
   *rest = tok;
   return nd;
 }
+
+
+// 解析条件运算符
+// conditional = logOr ("?" expr ":" conditional)?
+static Node *conditional(Token **rest, Token *tok) {
+  // logOr
+  Node *cond = log_or(&tok, tok);
+
+  // "?"
+  if (!equal(tok, "?")) {
+    *rest = tok;
+    return cond;
+  }
+
+  // expr ":" conditional
+  Node *nd = newnode(ND_COND, tok);
+  nd->cond = cond;
+  nd->then = expr(&tok, tok->next);
+  tok = skip(tok, ":");
+  nd->els = conditional(rest, tok);
+  return nd;
+}
+
 // 逻辑或
 // logOr = logAnd ("||" logAnd)*
 static Node *log_or(Token **rest, Token *tok) {

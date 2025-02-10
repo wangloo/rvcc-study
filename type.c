@@ -179,6 +179,15 @@ void add_type(Node *nd)
   case ND_VAR:
     nd->ty = nd->var->ty;
     return;
+  // 如果:左或右部为void则为void，否则为二者兼容的类型
+  case ND_COND:
+    if (nd->then->ty->kind == TY_VOID || nd->els->ty->kind == TY_VOID) {
+      nd->ty = TyVoid;
+    } else {
+      usual_arith_conv(&nd->then, &nd->els);
+      nd->ty = nd->then->ty;
+    }
+    return;
   // 将节点类型设为 成员的类型
   case ND_MEMBER:
     nd->ty = nd->mem->ty;
