@@ -136,8 +136,10 @@ void add_type(Node *nd)
     //  将类型设置为int
     nd->ty = TyInt;
     return;
+  // 将节点类型设置为 右部的类型
   case ND_BITNO:
-    // 将节点类型设置为 右部的类型
+  case ND_SHL:
+  case ND_SHR:
     nd->ty = nd->right->ty;
     return;
   case ND_NEG: {

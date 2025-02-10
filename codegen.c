@@ -410,6 +410,14 @@ static void gen_expr(Node *nd)
     println("  slt a0, a1, a0");
     println("  xori a0, a0, 1");
     return;
+  case ND_SHL:
+    println("  # a0逻辑左移a1位");
+    println("  sll%s a0, a0, a1", suffix);
+    return;
+  case ND_SHR:
+    println("  # a0算术右移a1位");
+    println("  sra%s a0, a0, a1", suffix);
+    return;
   default:
     break;
   }

@@ -352,10 +352,11 @@ static Type *struct_decl(Token **rest, Token *tok);
 // bitOr = BitXor ("|" bitXor)*
 // bitXor = BitAnd ("^" bitAnd)*
 // bitAnd = equality ("&" equality)*
-// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
-// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
-// add = mul ("+" mul | "-" mul)
-// mul = cast ("*" cast | "/" cast | "%" cast)
+// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
+// equality = shift ("<" shift | ">" shift | "<=" shift | ">=" shift | "!=" shift | "==" shift)
+// shift = add (<<" add | ">>" add)*
+// add = mul ("+" mul | "-" mul)*
+// mul = cast ("*" cast | "/" cast | "%" cast)*
 // cast = "(" typeName ") cast | unary
 // unary = ("+" | "-" | "&" | "*" | "!" | "~") cast | ("++" | "--") unary | postfix
 // postfix = primary ("[" expr "]" | "." ident | "->" ident | "++" | "--")*
@@ -385,6 +386,7 @@ static Node *log_and(Token **rest, Token *tok);
 static Node *bit_or(Token **rest, Token *tok);
 static Node *bit_xor(Token **rest, Token *tok);
 static Node *bit_and(Token **rest, Token *tok);
+static Node *shift(Token **rest, Token *tok);
 static Node *equality(Token **rest, Token *tok);
 static Node *add(Token **rest, Token *tok);
 static Node *mul(Token **rest, Token *tok);
@@ -1188,7 +1190,7 @@ static Node *to_assign(Node *binary) {
 
 // 解析赋值
 // assign = logOr (assignOp assign)?
-// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
+// assignOp = "=" | "+" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
 static Node *assign(Token **rest, Token *tok)
 {
   Node *nd = log_or(&tok, tok);
@@ -1231,6 +1233,12 @@ static Node *assign(Token **rest, Token *tok)
   // ("^=" assign)
   if (equal(tok, "^="))
     return to_assign(newbinary(ND_BITXOR, nd, assign(rest, tok->next), tok));
+  // ("<<=" assign)
+  if (equal(tok, "<<="))
+    return to_assign(newbinary(ND_SHL, nd, assign(rest, tok->next), tok));
+  // (">>=" assign)
+  if (equal(tok, ">>="))
+    return to_assign(newbinary(ND_SHR, nd, assign(rest, tok->next), tok));
 
   *rest = tok;
   return nd;
@@ -1292,44 +1300,68 @@ static Node *bit_and(Token **rest, Token *tok) {
   return nd;
 }
 
-
-// 解析条件运算符
-// equality = add ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
-static Node *equality(Token **rest, Token *tok)
-{
+// 解析位移
+// shift = add (<<" add | ">>" add)*
+static Node *shift(Token **rest, Token *tok) {
   // add
   Node *nd = add(&tok, tok);
 
-  // ("<" add | ">" add | "<=" add | ">=" add | "!=" add | "==" add)
   while (1) {
-    // "<" add
+    Token *start = tok;
+
+    // "<<" add
+    if (equal(tok, "<<")) {
+      nd = newbinary(ND_SHL, nd, add(&tok, tok->next), start);
+      continue;
+    }
+    // ">>" add
+    if (equal(tok, ">>")) {
+      nd = newbinary(ND_SHR, nd, add(&tok, tok->next), start);
+      continue;
+    }
+
+    *rest = tok;
+    return nd;
+  }
+}
+
+// 解析条件运算符
+// equality = shift ("<" shift | ">" shift | "<=" shift | ">=" shift | "!=" shift | "==" shift)
+static Node *equality(Token **rest, Token *tok)
+{
+  // shift
+  Node *nd = shift(&tok, tok);
+
+  // ("<" shift | ">" shift | "<=" shift | ">=" shift | "!=" shift | "==" shift)
+  while (1) {
+    // "<" shift
     if (equal(tok, "<")) {
-      nd = newbinary(ND_LT, nd, add(&tok, tok->next), tok);
+      nd = newbinary(ND_LT, nd, shift(&tok, tok->next), tok);
       continue;
     }
-    // ">" add ==> 改变孩子的左右顺序转换成 "<" 的情况
+    // ">" shift ==> 改变孩子的左右顺序转换成 "<" 的情况
     if (equal(tok, ">")) {
-      nd = newbinary(ND_LT, add(&tok, tok->next), nd, tok);
+      nd = newbinary(ND_LT, shift(&tok, tok->next), nd, tok);
       continue;
     }
-    // "<=" add
+    // "<=" shift
     if (equal(tok, "<=")) {
-      nd = newbinary(ND_LE, nd, add(&tok, tok->next), tok);
+      nd = newbinary(ND_LE, nd, shift(&tok, tok->next), tok);
       continue;
     }
-    // ">=" add ==> 改变孩子的左右顺序转换成 "<=" 的情况
+    // ">=" shift ==> 改变孩子的左右顺序转换成 "<=" 的情况
     if (equal(tok, ">=")) {
-      nd = newbinary(ND_LE, add(&tok, tok->next), nd, tok);
+      nd = newbinary(ND_LE, shift(&tok, tok->next), nd, tok);
       continue;
     }
-    // "!=" add
+    // "!=" shift
     if (equal(tok, "!=")) {
-      nd = newbinary(ND_NE, nd, add(&tok, tok->next), tok);
+      nd = newbinary(ND_NE, nd, shift(&tok, tok->next), tok);
       continue;
     }
-    // "==" add
+    // "==" shift
     if (equal(tok, "==")) {
-      nd = newbinary(ND_EQ, nd, add(&tok, tok->next), tok);
+      nd = newbinary(ND_EQ, nd, shift(&tok, tok->next), tok);
       continue;
     }
 

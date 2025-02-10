@@ -142,8 +142,8 @@ static bool iskeyword(Token *tok)
 static int read_punct(char *ptr) {
   // 判断多字节的操作符
   static char *Kw[] = {
-    "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=",
-    "/=", "++", "--", "%=", "&=", "|=", "^=", "&&", "||"};
+    "<<=", ">>=", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=",
+    "/=", "++", "--", "%=", "&=", "|=", "^=", "&&", "||", ">>", "<<"};
   for (int i = 0; i < sizeof(Kw) / sizeof(*Kw); i++) {
     if (starts_with(ptr, Kw[i]))
       return strlen(Kw[i]);
