@@ -71,6 +71,8 @@ typedef enum {
   ND_RETURN, // 返回
   ND_IF,     // "if" 条件判断
   ND_FOR,    // "for" 循环
+  ND_SWITCH, // "switch" 分支语句
+  ND_CASE,   // "case"
   ND_GOTO,   // goto, 直接跳转语句
   ND_LABEL,  // 标签语句
   ND_FUNCALL, // 函数调用
@@ -108,6 +110,10 @@ typedef struct Node {
   char *unique_label;
   struct Node *goto_next;
 
+  // switch和case
+  struct Node *case_next;
+  struct Node *default_case;
+
   // 结构体成员访问
   Member *mem;
 
@@ -116,7 +122,7 @@ typedef struct Node {
   Type *func_type;    // 函数类型
   struct Node *args;  // 函数参数
 
-  // if 语句 或者 "for" 语句
+  // if 语句 / "for" 语句 / switch 语句
   struct Node *cond;  // 条件内的表达式
   struct Node *then;  // 符合条件后的语句
   struct Node *els;   // 不符合条件后的语句

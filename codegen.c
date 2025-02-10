@@ -490,6 +490,36 @@ static void gen_stmt(Node *nd)
 
     return;
   }
+
+  if (nd->kind == ND_SWITCH) {
+    println("\n# =====switch语句===============");
+    gen_expr(nd->cond);
+
+    println("  # 遍历跳转到值等于a0的case标签");
+    for (Node *n = nd->case_next; n; n = n->case_next) {
+      println("  li t0, %ld", n->val);
+      println("  beq a0, t0, %s", n->label);
+    }
+    if (nd->default_case) {
+      println("  # 跳转到default标签");
+      println("  j %s", nd->default_case->label);
+    }
+
+    println("  # 结束switch，跳转break标签");
+    println("  j %s", nd->brk_label);
+    // 生成case标签的语句
+    gen_stmt(nd->then);
+    println("# switch的break标签，结束switch");
+    println("%s:", nd->brk_label);
+    return;
+  }
+  if (nd->kind == ND_CASE) {
+    println("# case标签，值为%ld", nd->val);
+    println("%s:", nd->label);
+    gen_stmt(nd->right);
+    return;
+  }
+
   // goto语句
   if (nd->kind == ND_GOTO) {
     println("  j %s", nd->unique_label);

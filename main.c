@@ -46,6 +46,10 @@ static Node *Labels;
 static char *BrkLabel;
 static char *ContLabel;
 
+// 如果我们正在解析switch语句，则指向表示switch的节点。
+// 否则为空。
+static Node *CurrentSwitch;
+
 // 所有域的链表
 static Scope *Scp = &(Scope){};
 // 指向当前正在解析的函数
@@ -331,6 +335,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | "switch" "(" expr ")" stmt
+//        | "case" num ":" stmt
+//        | "default" ":" stmt
 //        | "goto" ident ";"
 //        | "ident ":" stmt
 //        | "break" ";"
@@ -892,6 +899,9 @@ static Node *compound_stmt(Token **rest, Token *tok)
 //        | "for" "(" (exprStmt | declspec declarator)  expr? ";" expr? ")" stmt
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
+//        | "switch" "(" expr ")" stmt
+//        | "case" num ":" stmt
+//        | "default" ":" stmt
 //        | "goto" ident ";"
 //        | "ident ":" stmt
 //        | "break" ";"
@@ -981,6 +991,70 @@ static Node *stmt(Token **rest, Token *tok)
       nd->els = stmt(&tok, tok->next);
     }
     *rest = tok;
+    return nd;
+  }
+
+  // "switch" "(" expr ")" stmt
+  if (equal(tok, "switch")) {
+    Node *nd = newnode(ND_SWITCH, tok);
+    tok = skip(tok->next, "(");
+    nd->cond = expr(&tok, tok);
+    tok = skip(tok, ")");
+
+    // 记录此前的CurrentSwitch
+    Node *sw = CurrentSwitch;
+    // 设置当前的CurrentSwitch
+    CurrentSwitch = nd;
+
+    // 存储此前的break标签的名称
+    char *brk = BrkLabel;
+    // 设置break标签的名称
+    BrkLabel = nd->brk_label = new_unique_name();
+
+    // 进入解析各个case
+    // stmt
+    nd->then = stmt(rest, tok);
+
+    // 恢复此前的CurrentSwitch
+    CurrentSwitch = sw;
+    // 恢复此前的break标签的名称
+    BrkLabel = brk;
+    return nd;
+  }
+
+  // "case" num ":" stmt
+  if (equal(tok, "case")) {
+    if (!CurrentSwitch)
+      errorTok(tok, "stray case");
+    // case后面的数值
+    if (tok->next->kind != TK_NUM)
+      errorTok(tok->next, "expected a number");
+    int val = tok->next->val;
+
+    Node *nd = newnode(ND_CASE, tok);
+    tok = skip(tok->next->next, ":");
+    nd->label = new_unique_name();
+    // case中的语句
+    nd->right = stmt(rest, tok);
+    // case对应的数据
+    nd->val = val;
+    // 将旧的CurrentSwitch链表的头部存入Nd的CaseNext
+    nd->case_next = CurrentSwitch->case_next;
+    // 将nd存储CurrentSwitch的casenext
+    CurrentSwitch->case_next = nd;
+    return nd;
+  }
+
+  // "default" ":" stmt
+  if (equal(tok, "default")) {
+    if (!CurrentSwitch)
+      errorTok(tok, "stray case");
+
+    Node *nd = newnode(ND_CASE, tok);
+    tok = skip(tok->next, ":");
+    nd->label = new_unique_name();
+    nd->right = stmt(rest, tok);
+    CurrentSwitch->default_case = nd;
     return nd;
   }
 
