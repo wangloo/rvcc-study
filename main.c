@@ -44,6 +44,7 @@ static Node *Gotos;
 static Node *Labels;
 
 static char *BrkLabel;
+static char *ContLabel;
 
 // 所有域的链表
 static Scope *Scp = &(Scope){};
@@ -331,8 +332,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | "goto" ident ";"
-//        | "break" ";"
 //        | "ident ":" stmt
+//        | "break" ";"
+//        | "continue" ";"
 //        | expr? ";"
 //        | "{" compoundStmt
 // exprStmt = expt? ";"
@@ -893,6 +895,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
 //        | "goto" ident ";"
 //        | "ident ":" stmt
 //        | "break" ";"
+//        | "continue" ";"
 //        | expr? ";"
 //        | "{" compoundStmt
 static Node *stmt(Token **rest, Token *tok)
@@ -905,14 +908,17 @@ static Node *stmt(Token **rest, Token *tok)
     nd->cond = expr(&tok, tok);
     tok = skip(tok, ")");
 
-    // 存储此前break标签的名称
+    // 存储此前break标签和continue标签的名称
     char *brk = BrkLabel;
+    char *cont = ContLabel;
     // 设备break标签的名称
     BrkLabel = nd->brk_label = new_unique_name();
+    ContLabel = nd->cont_label = new_unique_name();
     // stmt
     nd->then = stmt(&tok, tok);
-    // 恢复此前的break标签
+    // 恢复此前的break标签和continue标签
     BrkLabel = brk;
+    ContLabel = cont;
     *rest = tok;
     return nd;
   }
@@ -924,10 +930,13 @@ static Node *stmt(Token **rest, Token *tok)
     // 进入for循环域
     enter_scope();
 
-    // 存储此前break标签的名称
+    // 存储此前break标签和continue标签的名称
     char *brk = BrkLabel;
-    // 设备break标签的名称
+    char *cont = ContLabel;
+    // 设备break标签和continue标签的名称
     BrkLabel = nd->brk_label = new_unique_name();
+    ContLabel = nd->cont_label = new_unique_name();
+
 
     // init
     // init的处理比较特殊，for 循环的init是一条statement，
@@ -954,8 +963,9 @@ static Node *stmt(Token **rest, Token *tok)
 
     // 退出for循环域
     leave_scope();
-    // 恢复此前的break标签
+    // 恢复此前的break标签和continue标签
     BrkLabel = brk;
+    ContLabel = cont;
     *rest = tok;
     return nd;
   }
@@ -996,12 +1006,24 @@ static Node *stmt(Token **rest, Token *tok)
     return nd;
   }
 
+  // "break" ";"
   if (equal(tok, "break")) {
     if (!BrkLabel)
       errorTok(tok, "stray break");
     // 跳转到break标签的位置
     Node *nd = newnode(ND_GOTO, tok);
     nd->unique_label = BrkLabel;
+    *rest = skip(tok->next, ";");
+    return nd;
+  }
+
+  // "continue" ";"
+  if (equal(tok, "continue")) {
+    if (!ContLabel)
+      errorTok(tok, "stray continue");
+    // 跳转到continue标签的位置
+    Node *nd = newnode(ND_GOTO, tok);
+    nd->unique_label = ContLabel;
     *rest = skip(tok->next, ";");
     return nd;
   }

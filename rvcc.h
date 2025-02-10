@@ -100,6 +100,8 @@ typedef struct Node {
 
   // "break"标签
   char *brk_label;
+  // "continue"标签
+  char *cont_label;
 
   // goto和标签语句
   char *label;

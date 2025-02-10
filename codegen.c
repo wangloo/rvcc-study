@@ -446,9 +446,12 @@ static void gen_stmt(Node *nd)
     // 生成循环体语句
     println("\n# Then语句%d", c);
     gen_stmt(nd->then);
+    // continue标签语句
+    println("%s:", nd->cont_label);
     // 处理循环递增语句
     if (nd->inc) {
       // 生成循环递增语句
+      println("\n# Inc语句%d", c);
       gen_expr(nd->inc);
     }
     // 跳转到循环头部
