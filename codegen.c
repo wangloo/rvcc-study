@@ -255,7 +255,7 @@ static void gen_expr(Node *nd)
     return;
   }
   // 按bit取反操作
-  if (nd->kind == ND_BITNO) {
+  if (nd->kind == ND_BITNOT) {
     gen_expr(nd->right);
     println("  # 按位取反");
     // 这里的 not a0, a0 为 xori a0, a0, -1 的伪码

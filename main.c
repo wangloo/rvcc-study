@@ -328,7 +328,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 // structUnionDecl = ident? ("{" struct Members)?
 // declarator = "*"* ("(" declarator ")" | ident) typeSuffix
 // typeSuffix = "(" funcParams | "[" arrayDimensions | ε
-// arrayDimensions = num? "]" typesuffix
+// arrayDimensions = constExpr? "]" typesuffix
 // funcParams = (param ("," param)*)? ")"
 // param = declspec declarator
 // stmt = ("return") expr ";"
@@ -336,7 +336,7 @@ static Type *struct_decl(Token **rest, Token *tok);
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | "switch" "(" expr ")" stmt
-//        | "case" num ":" stmt
+//        | "case" constExpr ":" stmt
 //        | "default" ":" stmt
 //        | "goto" ident ";"
 //        | "ident ":" stmt
@@ -381,6 +381,7 @@ static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
+static int64_t const_expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
 static Node *conditional(Token **rest, Token *tok);
 static Node *log_or(Token **rest, Token *tok);
@@ -566,7 +567,7 @@ static bool is_function(Token *tok)
 }
 
 
-// arrayDimensions = num? "]" typeSuffix
+// arrayDimensions = constExpr? "]" typeSuffix
 static Type *array_dimensions(Token **rest, Token *tok, Type *ty) {
   // "]" 无数组维度的 "[]"
   if (equal(tok, "]")) {
@@ -575,10 +576,8 @@ static Type *array_dimensions(Token **rest, Token *tok, Type *ty) {
   }
 
   // 有数组维度的情况
-  if (tok->kind != TK_NUM)
-    errorTok(tok, "expected a numer");
-  int sz = tok->val;
-  tok = skip(tok->next, "]");
+  int sz = const_expr(&tok, tok);
+  tok = skip(tok, "]");
   ty = type_suffix(rest, tok, ty);
   return arrayof(ty, sz);
 }
@@ -904,7 +903,7 @@ static Node *compound_stmt(Token **rest, Token *tok)
 //        | "while" "(" expr ")" stmt
 //        | "if" "(" expr ")" stmt ("else" stmt)?
 //        | "switch" "(" expr ")" stmt
-//        | "case" num ":" stmt
+//        | "case" constExpr ":" stmt
 //        | "default" ":" stmt
 //        | "goto" ident ";"
 //        | "ident ":" stmt
@@ -1026,17 +1025,15 @@ static Node *stmt(Token **rest, Token *tok)
     return nd;
   }
 
-  // "case" num ":" stmt
+  // "case" constExpr ":" stmt
   if (equal(tok, "case")) {
     if (!CurrentSwitch)
       errorTok(tok, "stray case");
-    // case后面的数值
-    if (tok->next->kind != TK_NUM)
-      errorTok(tok->next, "expected a number");
-    int val = tok->next->val;
 
     Node *nd = newnode(ND_CASE, tok);
-    tok = skip(tok->next->next, ":");
+    // case后面的数值
+    int val = const_expr(&tok, tok->next);
+    tok = skip(tok, ":");
     nd->label = new_unique_name();
     // case中的语句
     nd->right = stmt(rest, tok);
@@ -1162,6 +1159,81 @@ static Node *expr(Token **rest, Token *tok) {
 
   *rest = tok;
   return nd;
+}
+
+static int64_t eval(Node *nd) {
+  add_type(nd);
+
+  switch (nd->kind)
+  {
+  case ND_ADD:
+    return eval(nd->left) + eval(nd->right);
+  case ND_SUB:
+    return eval(nd->left) - eval(nd->right);
+  case ND_MUL:
+    return eval(nd->left) * eval(nd->right);
+  case ND_DIV:
+    return eval(nd->left) / eval(nd->right);
+  case ND_NEG:
+    return -eval(nd->right);
+  case ND_MOD:
+    return eval(nd->left) % eval(nd->right);
+  case ND_BITAND:
+    return eval(nd->left) & eval(nd->right);
+  case ND_BITOR:
+    return eval(nd->left) | eval(nd->right);
+  case ND_BITXOR:
+    return eval(nd->left) ^ eval(nd->right);
+  case ND_SHL:
+    return eval(nd->left) << eval(nd->right);
+  case ND_SHR:
+    return eval(nd->left) >> eval(nd->right);
+  case ND_EQ:
+    return eval(nd->left) == eval(nd->right);
+  case ND_NE:
+    return eval(nd->left) != eval(nd->right);
+  case ND_LT:
+    return eval(nd->left) < eval(nd->right);
+  case ND_LE:
+    return eval(nd->left) <= eval(nd->right);
+  case ND_COND:
+    return eval(nd->cond) ? eval(nd->then) : eval(nd->els);
+  case ND_COMMA:
+    return eval(nd->right);
+  case ND_NOT:
+    return !eval(nd->right);
+  case ND_BITNOT:
+    return ~eval(nd->right);
+  case ND_LOGAND:
+    return eval(nd->left) && eval(nd->right);
+  case ND_LOGOR:
+    return eval(nd->left) || eval(nd->right);
+  case ND_CAST:
+    if (is_integer(nd->ty)) {
+      switch(nd->ty->size) {
+      case 1:
+        return (uint8_t)eval(nd->left);
+      case 2:
+        return (uint16_t)eval(nd->left);
+      case 4:
+        return (uint32_t)eval(nd->left);
+      }
+    }
+    return eval(nd->left);
+  case ND_NUM:
+    return nd->val;
+  default:
+    break;
+  }
+
+  errorTok(nd->tok, "not a compile-time constant");
+  return -1;
+}
+static int64_t const_expr(Token **rest, Token *tok) {
+  // 进行常量表达式的构造
+  Node *nd = conditional(rest, tok);
+  // 进行常量表达式的计算
+  return eval(nd);
 }
 
 // 转换 A op= B 为 TMP = &A, *TMP = *TMP OP B
@@ -1502,7 +1574,7 @@ static Node *unary(Token **rest, Token *tok)
   }
   // "~" cast
   if (equal(tok, "~")) {
-    nd = newunary(ND_BITNO, cast(rest, tok->next), tok);
+    nd = newunary(ND_BITNOT, cast(rest, tok->next), tok);
     return nd;
   }
 
@@ -1699,7 +1771,7 @@ static Node *primary(Token **rest, Token *tok)
 // 获取枚举类型信息
 // enumSpecifier = ident? "{" enumList? "}"
 //              | ident ("{" enumList? "}")?
-// enumList = ident ("=" num)? ("," ident ("=" num)?)*
+// enumList = ident ("=" constExpr)? ("," ident ("=" constExpr)?)*
 static Type *enum_specifier(Token **rest, Token *tok) {
   Type *ty = enumtype();
 
@@ -1733,10 +1805,8 @@ static Type *enum_specifier(Token **rest, Token *tok) {
     char *name = get_ident(tok);
     tok = tok->next;
 
-    if (equal(tok, "=")) {
-      val = tok->next->val;
-      tok = tok->next->next;
-    }
+    if (equal(tok, "="))
+      val = const_expr(&tok, tok->next);
 
     // 存入枚举常量
     VarScope *s = push_scope(name);

@@ -68,7 +68,7 @@ typedef enum {
   ND_DEREF,     // 解引用 *
   ND_NOT,       // ! 非
   ND_MOD,       // % 取余
-  ND_BITNO,     // 按位取反
+  ND_BITNOT,     // 按位取反
   ND_LOGAND,    // && 与
   ND_LOGOR,     // || 或
   ND_RETURN, // 返回
