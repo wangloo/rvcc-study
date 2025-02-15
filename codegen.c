@@ -214,6 +214,11 @@ static void gen_expr(Node *nd)
 {
   //.loc 文件编号 行号
   println(" .loc 1 %d", nd->tok->lineno);
+
+  // 生成各个根节点
+  if (nd->kind == ND_NULL_EXPR) {
+    return;
+  }
   if (nd->kind == ND_NUM) {
     println("  # 将%d加载到a0中", nd->val);
     println("  li a0, %ld", nd->val);

@@ -35,6 +35,30 @@ typedef struct {
   bool is_static;  // 是否为文件域内
 } VarAttr;
 
+// 可变的初始化器。此处为树状结构
+// 因为初始化器是可以嵌套的
+// 类似于 int x[2][2] = {{1,2}, {3, 4}}
+typedef struct Initializer Initializer;
+struct Initializer {
+  Initializer *next;  // 下一个
+  Type *ty;           // 原始类型
+  Token *tok;         // 终结符
+
+  // 如果不是聚合类型，并且有一个初始化器，Expr 有对应的初始化表达式。
+  Node *expr;
+
+  // 如果是聚合类型（如数组或结构体），Children有子节点的初始化器
+  Initializer **children;
+};
+
+// 指派初始化，用于局部变量的初始化器
+typedef struct InitDesig InitDesig;
+struct InitDesig {
+  InitDesig *next;  // 下一个
+  int idx;          // 数组中的索引
+  Obj *var;         // 对应的变量
+};
+
 // 在解析时，全部的变量实例都被累加到这个列表里。
 Obj *Locals;  // 局部变量
 Obj *Globals; // 全局变量
@@ -308,6 +332,24 @@ static void push_tagscope(Token *tok, Type *ty) {
   Scp->tags = s;
 }
 
+// 新建初始化器
+static  Initializer *new_initializer(Type *ty) {
+  Initializer *init = calloc(1, sizeof(Initializer));
+
+  // 存储原始类型
+  init->ty = ty;
+
+  // 处理数组类型
+  if (ty->kind == TY_ARRAY) {
+    // 为数组的最外层的每个元素分配空间
+    init->children = calloc(ty->arraylen, sizeof(Initializer *));
+    // 遍历解析数组最外层的每个元素
+    for (int i = 0; i < ty->arraylen; ++i)
+      init->children[i] = new_initializer(ty->base);
+  }
+  return init;
+}
+
 
 
 static Node *struct_ref(Node *left, Token *tok);
@@ -317,8 +359,8 @@ static Type *struct_decl(Token **rest, Token *tok);
 // functionDefinition = declspec declarator (";" | "{" compoundStmt)
 // globalVariable = declspec declarator
 // compoundStmt = (declaration | stmt*) "}"
-// declaration =
-//        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
+// declaration = declspec (declarator ("=" initializer)?
+//                          ("," declarator ("=" initializer)?)*)? ";"
 // declspec = ("void" | "_Bool" | "int" | "long" | "short" | "char"
 //             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName)+
@@ -376,6 +418,7 @@ static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
+static Node *lvar_initializer(Token **rest, Token *tok, Obj *var);
 static Type *enum_specifier(Token **rest, Token *tok);
 static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
@@ -810,8 +853,8 @@ static Token *global_variable(Token *tok, Type *base)
 }
 
 
-// declaration =
-//        declspec (declarator ("=" assign)? ("," declarator ("=" assign)?)*)? ";"
+// declaration = declspec (declarator ("=" initializer)?
+//                          ("," declarator ("=" initializer)?)*)? ";"
 static Node *declaration(Token **rest, Token *tok, Type *basety)
 {
   Node head = {};
@@ -819,7 +862,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
   // 对变量声明次数的计数
   int i = 0;
 
-  // (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+  // (declarator ("=" initializer)? ("," declarator ("=" initializer)?)*)? ";"
   while (!equal(tok, ";")) {
     // 第1个变量不必匹配 ","
     if (i++ > 0)
@@ -834,18 +877,14 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
     Obj *var = new_local(get_ident(ty->name), ty);
 
     // 如果不存在"="则为变量声明，不需要生成节点，已经存储在Locals中了
-    if (!equal(tok, "="))
-      continue;
-
-    // 解析"="后面的token
-    Node *left = new_varnode(var, ty->name);
-    // 解析递归赋值语句
-    // tok->next 跳过 "="
-    Node *right = assign(&tok, tok->next);
-    Node *node = newbinary(ND_ASSIGN, left, right, tok);
-    // 存放在表达式语句中
-    cur->next = newbinary(ND_EXPR_STMT, NULL, node, tok);
-    cur = cur->next;
+    if (equal(tok, "=")) {
+      // 解析"="后面的token
+      // 解析变量的初始化器
+      Node *expr = lvar_initializer(&tok, tok->next, var);
+      // 存放在表达式语句中
+      cur->next = newunary(ND_EXPR_STMT, expr, tok);
+      cur = cur->next;
+    }
   }
 
   // 将所有表达式语句，存放在代码块中
@@ -853,6 +892,82 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
   nd->body = head.next;
   *rest = tok->next;
   return nd;
+}
+
+// initializer = "{" initializer ("," initializer)* "}" | assign
+static void initializer2(Token **rest, Token *tok, Initializer *init) {
+  // "{" initializer ("," initiazer)* "}"
+  if (init->ty->kind == TY_ARRAY) {
+    tok = skip(tok, "{");
+
+    // 遍历数组
+    for (int i = 0; i < init->ty->arraylen; i++) {
+      if (i > 0)
+        tok = skip(tok, ",");
+      initializer2(&tok, tok, init->children[i]);
+    }
+    *rest = skip(tok, "}");
+    return;
+  }
+
+  // assign
+  // 为节点存储对应的表达式
+  init->expr = assign(rest, tok);
+}
+
+// 初始化器
+static Initializer *initializer(Token **rest, Token *tok, Type *ty) {
+  // 新建了一个解析了类型的初始化器
+  Initializer *init = new_initializer(ty);
+  // 解析需要赋值到Init中
+  initializer2(rest, tok, init);
+  return init;
+}
+
+// 指派初始化表达式
+static Node *init_desig_expr(InitDesig *desig, Token *tok) {
+  // 返回desig中的变量
+  if (desig->var)
+    return new_varnode(desig->var, tok);
+
+  // 需要赋值的变量名
+  // 递归到次外层desig，有此事最外层有desig->var
+  // 然后逐层计算偏移量
+  Node *left = init_desig_expr(desig->next, tok);
+  // 偏移量
+  Node *right = newnum(desig->idx, tok);
+  return newunary(ND_DEREF, newadd(left, right, tok), tok);
+}
+
+// 创建局部变量的初始化
+static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Token *tok) {
+  if (ty->kind == TY_ARRAY) {
+    // 预备空表达式的情况
+    Node *nd = newnode(ND_NULL_EXPR, tok);
+    for (int i = 0; i < ty->arraylen; i++) {
+      // 这里next指向了上一级design的信息，以及在其中的偏移量
+      InitDesig desig2 = {desig, i};
+      // 局部变量进行初始化
+      Node *right = create_lvar_init(init->children[i], ty->base, &desig2, tok);
+      nd = newbinary(ND_COMMA, nd, right, tok);
+    }
+    return nd;
+  }
+
+  // 变量等可以直接赋值的左值
+  Node *left = init_desig_expr(desig, tok);
+  // 初始化的右值
+  Node *right = init->expr;
+  return newbinary(ND_ASSIGN, left, right, tok);
+}
+
+static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
+  // 获取初始化器，将值与数据结构一一对应
+  Initializer *init = initializer(rest, tok, var->ty);
+  // 指派初始化
+  InitDesig desig = {NULL, 0, var};
+  // 创建局部变量的初始化
+  return create_lvar_init(init, var->ty, &desig, tok);
 }
 
 // compoundStmt = (declaration | stmt*) "}"
