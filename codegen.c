@@ -236,6 +236,14 @@ static void gen_expr(Node *nd)
     load(nd->ty);
     return;
   }
+  if (nd->kind == ND_MEMZERO) {
+    println("  # 对%s的内存%d(fp)清零%d位", nd->var->name, nd->var->offset,
+            nd->var->ty->size);
+    // 对栈内变量所占用的每个字节都进行清零
+    for (int i = 0; i < nd->var->ty->size; i++)
+      println("  sb zero, %d(fp)", nd->var->offset + i);
+    return;
+  }
   // 条件运算符
   if (nd->kind == ND_COND) {
     int c = count();

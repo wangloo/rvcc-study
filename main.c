@@ -901,7 +901,7 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
     tok = skip(tok, "{");
 
     // 遍历数组
-    for (int i = 0; i < init->ty->arraylen; i++) {
+    for (int i = 0; i < init->ty->arraylen && !equal(tok, "}"); i++) {
       if (i > 0)
         tok = skip(tok, ",");
       initializer2(&tok, tok, init->children[i]);
@@ -954,11 +954,13 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Tok
     return nd;
   }
 
+  // 如果需要作为右值的表达式为空，则设为空表达式
+  if (!init->expr)
+    return newnode(ND_NULL_EXPR, tok);
+
   // 变量等可以直接赋值的左值
   Node *left = init_desig_expr(desig, tok);
-  // 初始化的右值
-  Node *right = init->expr;
-  return newbinary(ND_ASSIGN, left, right, tok);
+  return newbinary(ND_ASSIGN, left, init->expr, tok);
 }
 
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
@@ -966,8 +968,14 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   Initializer *init = initializer(rest, tok, var->ty);
   // 指派初始化
   InitDesig desig = {NULL, 0, var};
+
+  // 首先将所有元素赋0，然后有制定值的再进行赋值
+  Node *left = newnode(ND_MEMZERO, tok);
+  left->var = var;
+
   // 创建局部变量的初始化
-  return create_lvar_init(init, var->ty, &desig, tok);
+  Node *right = create_lvar_init(init, var->ty, &desig, tok);
+  return newbinary(ND_COMMA, left, right, tok);
 }
 
 // compoundStmt = (declaration | stmt*) "}"
