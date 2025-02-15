@@ -13,6 +13,11 @@
 #include <assert.h>
 #include <strings.h>
 
+// 宏展开函数
+// 括号是为了保证内部表达式作为整体去求值
+#define MAX(x, y) ((x) < (y) ? (y) : (x))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
 //
 // 字符串
 //

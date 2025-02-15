@@ -365,6 +365,9 @@ static Type *struct_decl(Token **rest, Token *tok);
 //             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName)+
 //             | enumSpecifier)+
+// initializer = stringInitializer | arrayInitializer | assign
+// stringInitializer = stringLiteral
+// arrayInitializer = "{" initializer ("," initializer)* "}"
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -418,6 +421,7 @@ static Token *global_variable(Token *tok, Type *base);
 static Node *compound_stmt(Token **rest, Token *tok);
 static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
+static void initializer2(Token **rest, Token *tok, Initializer *init);
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var);
 static Type *enum_specifier(Token **rest, Token *tok);
 static Type *type_suffix(Token **rest, Token *tok, Type *ty);
@@ -905,25 +909,46 @@ static Token *skip_excess_element(Token *tok) {
   return tok;
 }
 
-// initializer = "{" initializer ("," initializer)* "}" | assign
+// stringInitializer = stringLiteral
+static void string_initializer(Token **rest, Token *tok, Initializer *init) {
+  //  取数组和字符串的最短长度
+  int len = MIN(init->ty->arraylen, tok->ty->arraylen);
+  // 遍历赋值
+  for (int i = 0; i < len; i++)
+    init->children[i]->expr = newnum(tok->str[i], tok);
+  *rest = tok->next;
+}
+
+
+// arrayInitializer = "{" initializer ("," initializer)* "}"
+static void array_initializer(Token **rest, Token *tok, Initializer *init) {
+  tok = skip(tok, "{");
+
+  // 遍历数组
+  for (int i = 0; !consume(rest, tok, "}"); i++) {
+    if (i > 0)
+      tok = skip(tok, ",");
+
+    // 正常解析元素
+    if (i < init->ty->arraylen)
+      initializer2(&tok, tok, init->children[i]);
+    // 跳过多余的元素
+    else
+      tok = skip_excess_element(tok);
+  }
+  *rest = skip(tok, "}");
+}
+
+// initializer = stringInitializer | arrayInitializer | assign
 static void initializer2(Token **rest, Token *tok, Initializer *init) {
-  // "{" initializer ("," initiazer)* "}"
+  // 字符串字面量的初始化
+  if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
+    string_initializer(rest, tok, init);
+    return;
+  }
+  // 数组的初始化
   if (init->ty->kind == TY_ARRAY) {
-    tok = skip(tok, "{");
-
-    // 遍历数组
-    for (int i = 0; !consume(rest, tok, "}"); i++) {
-      if (i > 0)
-        tok = skip(tok, ",");
-
-      // 正常解析元素
-      if (i < init->ty->arraylen)
-        initializer2(&tok, tok, init->children[i]);
-      // 跳过多余的元素
-      else
-        tok = skip_excess_element(tok);
-    }
-    *rest = skip(tok, "}");
+    array_initializer(rest, tok, init);
     return;
   }
 
