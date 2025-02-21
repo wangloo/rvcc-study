@@ -43,6 +43,7 @@ struct Initializer {
   Initializer *next;  // 下一个
   Type *ty;           // 原始类型
   Token *tok;         // 终结符
+  bool is_flexible;    // 可调整的，表示需要重新构造
 
   // 如果不是聚合类型，并且有一个初始化器，Expr 有对应的初始化表达式。
   Node *expr;
@@ -333,7 +334,7 @@ static void push_tagscope(Token *tok, Type *ty) {
 }
 
 // 新建初始化器
-static  Initializer *new_initializer(Type *ty) {
+static  Initializer *new_initializer(Type *ty, bool is_flexible) {
   Initializer *init = calloc(1, sizeof(Initializer));
 
   // 存储原始类型
@@ -341,11 +342,17 @@ static  Initializer *new_initializer(Type *ty) {
 
   // 处理数组类型
   if (ty->kind == TY_ARRAY) {
+    // 判断是否需要调整数组元素数并且数组不完整
+    if (is_flexible && ty->size < 0) {
+      // 设置初始化器为可调整的，之后进行完数组元素数的计算后，再构造初始化器
+      init->is_flexible = true;
+      return init;
+    }
     // 为数组的最外层的每个元素分配空间
     init->children = calloc(ty->arraylen, sizeof(Initializer *));
     // 遍历解析数组最外层的每个元素
     for (int i = 0; i < ty->arraylen; ++i)
-      init->children[i] = new_initializer(ty->base);
+      init->children[i] = new_initializer(ty->base, false);
   }
   return init;
 }
@@ -874,8 +881,6 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
 
     // declarator
     Type *ty = declarator(&tok, tok, basety);
-    if (ty->size < 0)
-      errorTok(tok, "variable has incomplete type");
     if (ty->kind == TY_VOID)
       errorTok(tok, "variable declared void");
     Obj *var = new_local(get_ident(ty->name), ty);
@@ -889,6 +894,11 @@ static Node *declaration(Token **rest, Token *tok, Type *basety)
       cur->next = newunary(ND_EXPR_STMT, expr, tok);
       cur = cur->next;
     }
+
+    if (var->ty->size < 0)
+      errorTok(ty->name, "variable has incomplete type");
+    if (var->ty->kind == TY_VOID)
+      errorTok(ty->name, "variable declared void");
   }
 
   // 将所有表达式语句，存放在代码块中
@@ -911,6 +921,11 @@ static Token *skip_excess_element(Token *tok) {
 
 // stringInitializer = stringLiteral
 static void string_initializer(Token **rest, Token *tok, Initializer *init) {
+  // 如果是可调整的，就构造一个包含数组的初始化器
+  // 字符串字面量再词法解析部分就已经增加了\0
+  if (init->is_flexible)
+    *init = *new_initializer(arrayof(init->ty->base, tok->ty->arraylen), false);
+
   //  取数组和字符串的最短长度
   int len = MIN(init->ty->arraylen, tok->ty->arraylen);
   // 遍历赋值
@@ -920,9 +935,30 @@ static void string_initializer(Token **rest, Token *tok, Initializer *init) {
 }
 
 
+// 计算数组初始化元素个数
+static int count_array_init_elements(Token *tok, Type *ty) {
+  Initializer *dummy = new_initializer(ty->base, false);
+  // 项数
+  int i = 0;
+  // 遍历所有匹配的项
+  for (; !equal(tok, "}"); i++) {
+    if (i > 0)
+      tok = skip(tok, ",");
+    initializer2(&tok, tok, dummy);
+  }
+  return i;
+}
+
 // arrayInitializer = "{" initializer ("," initializer)* "}"
 static void array_initializer(Token **rest, Token *tok, Initializer *init) {
   tok = skip(tok, "{");
+
+  // 如果数组是可调整的，那么就计算数组的元素数，然后进行初始化器的构造
+  if (init->is_flexible) {
+    int len = count_array_init_elements(tok, init->ty);
+    // 在这里ty也被重新构造为了数组
+    *init = *new_initializer(arrayof(init->ty->base, len), false);
+  }
 
   // 遍历数组
   for (int i = 0; !consume(rest, tok, "}"); i++) {
@@ -958,11 +994,12 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
 }
 
 // 初始化器
-static Initializer *initializer(Token **rest, Token *tok, Type *ty) {
+static Initializer *initializer(Token **rest, Token *tok, Type *ty, Type **new_ty) {
   // 新建了一个解析了类型的初始化器
-  Initializer *init = new_initializer(ty);
+  Initializer *init = new_initializer(ty, true);
   // 解析需要赋值到Init中
   initializer2(rest, tok, init);
+  *new_ty = init->ty;
   return init;
 }
 
@@ -1007,7 +1044,7 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Tok
 
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   // 获取初始化器，将值与数据结构一一对应
-  Initializer *init = initializer(rest, tok, var->ty);
+  Initializer *init = initializer(rest, tok, var->ty, &var->ty);
   // 指派初始化
   InitDesig desig = {NULL, 0, var};
 
