@@ -57,6 +57,7 @@ typedef struct InitDesig InitDesig;
 struct InitDesig {
   InitDesig *next;  // 下一个
   int idx;          // 数组中的索引
+  Member *mem;      // 成员变量
   Obj *var;         // 对应的变量
 };
 
@@ -353,6 +354,22 @@ static  Initializer *new_initializer(Type *ty, bool is_flexible) {
     // 遍历解析数组最外层的每个元素
     for (int i = 0; i < ty->arraylen; ++i)
       init->children[i] = new_initializer(ty->base, false);
+    return init;
+  }
+
+  // 处理结构体
+  if (ty->kind == TY_STRUCT) {
+    // 计算结构体成员的数量
+    int len = 0;
+    for (Member *mem = ty->mems; mem; mem = mem->next)
+      ++len;
+
+    // 初始化器的子项
+    init->children = calloc(len, sizeof(Initializer *));
+    // 遍历子项进行赋值
+    for (Member *mem = ty->mems; mem; mem = mem->next)
+      init->children[mem->idx] = new_initializer(mem->ty, false);
+    return init;
   }
   return init;
 }
@@ -372,9 +389,10 @@ static Type *struct_decl(Token **rest, Token *tok);
 //             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName)+
 //             | enumSpecifier)+
-// initializer = stringInitializer | arrayInitializer | assign
+// initializer = stringInitializer | arrayInitializer | structInitializer | assign
 // stringInitializer = stringLiteral
 // arrayInitializer = "{" initializer ("," initializer)* "}"
+// structInitializer = "{" initializer ("," initializer)* "}"
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -975,7 +993,29 @@ static void array_initializer(Token **rest, Token *tok, Initializer *init) {
   *rest = skip(tok, "}");
 }
 
-// initializer = stringInitializer | arrayInitializer | assign
+// structInitializer = "{" initializer ("," initializer)* "}"
+static void struct_initializer(Token **rest, Token *tok, Initializer *init) {
+  tok = skip(tok, "{");
+
+  // 成员变量的列表
+  Member *mem = init->ty->mems;
+
+  while (!consume(rest, tok, "}")) {
+    // mem未指向init->ty->mems，则说明mem进行过next的操作，就不是第一个
+    if (mem != init->ty->mems)
+      tok = skip(tok, ",");
+
+    if (mem) {
+      initializer2(&tok, tok, init->children[mem->idx]);
+      mem = mem->next;
+    } else {
+      // 处理多余的成员
+      tok = skip_excess_element(tok);
+    }
+  }
+}
+
+// initializer = stringInitializer | arrayInitializer | structInitializer | assign
 static void initializer2(Token **rest, Token *tok, Initializer *init) {
   // 字符串字面量的初始化
   if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
@@ -985,6 +1025,12 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
   // 数组的初始化
   if (init->ty->kind == TY_ARRAY) {
     array_initializer(rest, tok, init);
+    return;
+  }
+
+  // 结构体的初始化
+  if (init->ty->kind == TY_STRUCT) {
+    struct_initializer(rest, tok, init);
     return;
   }
 
@@ -1009,8 +1055,15 @@ static Node *init_desig_expr(InitDesig *desig, Token *tok) {
   if (desig->var)
     return new_varnode(desig->var, tok);
 
+  // 返回desig中的成员变量
+  if (desig->mem) {
+    Node *nd = newunary(ND_MEMBER, init_desig_expr(desig->next, tok), tok);
+    nd->mem = desig->mem;
+    return nd;
+  }
+
   // 需要赋值的变量名
-  // 递归到次外层desig，有此事最外层有desig->var
+  // 递归到次外层Desig，有此时最外层有Desig->Var或者Desig->Mem
   // 然后逐层计算偏移量
   Node *left = init_desig_expr(desig->next, tok);
   // 偏移量
@@ -1033,6 +1086,19 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Tok
     return nd;
   }
 
+  if (ty->kind == TY_STRUCT) {
+    // 构造结构体的初始化器结构
+    Node *nd = newnode(ND_NULL_EXPR, tok);
+
+    for (Member *mem = ty->mems; mem; mem = mem->next) {
+      // design2 存储了成员信息
+      InitDesig design2 = {desig, 0, mem};
+      Node *right = create_lvar_init(init->children[mem->idx], mem->ty, &design2, tok);
+      nd = newbinary(ND_COMMA, nd, right, tok);
+    }
+    return nd;
+  }
+
   // 如果需要作为右值的表达式为空，则设为空表达式
   if (!init->expr)
     return newnode(ND_NULL_EXPR, tok);
@@ -1046,7 +1112,7 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   // 获取初始化器，将值与数据结构一一对应
   Initializer *init = initializer(rest, tok, var->ty, &var->ty);
   // 指派初始化
-  InitDesig desig = {NULL, 0, var};
+  InitDesig desig = {NULL, 0, NULL, var};
 
   // 首先将所有元素赋0，然后有制定值的再进行赋值
   Node *left = newnode(ND_MEMZERO, tok);
@@ -2030,6 +2096,7 @@ static Type *enum_specifier(Token **rest, Token *tok) {
 static void struct_members(Token **rest, Token *tok, Type *ty) {
   Member head = {};
   Member *cur = &head;
+  int idx = 0;
 
   while (!equal(tok, "}")) {
     // declspec
@@ -2045,6 +2112,7 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
       // declarator
       mem->ty = declarator(&tok, tok, basety);
       mem->name = mem->ty->name;
+      mem->idx = idx++;
       cur = cur->next = mem;
     }
   }

@@ -212,6 +212,7 @@ typedef struct Member {
 	Member *next; // 下个成员
 	Type *ty;     // 成员的类型
 	Token *name;  // 名称
+  int idx;      // 索引值
 	int offset;   // 偏移量
 } Member;
 
