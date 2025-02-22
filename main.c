@@ -450,11 +450,13 @@ static Node *declaration(Token **rest, Token *tok, Type *basety);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static void initializer2(Token **rest, Token *tok, Initializer *init);
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var);
+static void gvar_initializer(Token **rest, Token *tok, Obj *var);
 static Type *enum_specifier(Token **rest, Token *tok);
 static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
+static int64_t eval(Node *nd);
 static int64_t const_expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
 static Node *conditional(Token **rest, Token *tok);
@@ -878,7 +880,9 @@ static Token *global_variable(Token *tok, Type *base)
       tok = skip(tok, ",");
     first = false;
     Type *ty = declarator(&tok, tok, base);
-    new_global(get_ident(ty->name), ty);
+    Obj *var = new_global(get_ident(ty->name), ty);
+    if (equal(tok, "="))
+      gvar_initializer(&tok, tok->next, var);
   }
   return tok;
 }
@@ -1154,6 +1158,44 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   // 创建局部变量的初始化
   Node *right = create_lvar_init(init, var->ty, &desig, tok);
   return newbinary(ND_COMMA, left, right, tok);
+}
+
+// 临时转换buf类型对val进行存储
+static void write_buf(char *buf, uint64_t val, int sz) {
+  if (sz == 1)
+    *buf = val;
+  else if (sz == 2)
+    *(uint16_t *)buf = val;
+  else if (sz == 4)
+    *(uint32_t *)buf = val;
+  else if (sz == 8)
+    *(uint64_t *)buf = val;
+  else
+    unreachable();
+}
+
+// 对全局变量的初始化器写入数据
+static void write_gvar_data(Initializer *init, Type *ty, char *buf, int offset) {
+  // 处理数组
+  if (ty->kind == TY_ARRAY) {
+    int sz = ty->base->size;
+    for (int i = 0; i < ty->arraylen; i++)
+      write_gvar_data(init->children[i], ty->base, buf, offset + sz * i);
+    return;
+  }
+  // 计算常量表达式
+  if (init->expr)
+    write_buf(buf + offset, eval(init->expr), ty->size);
+}
+
+static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
+  // 获取到初始化器
+  Initializer *init = initializer(rest, tok, var->ty, &var->ty);
+
+  // 写入计算后的值
+  char *buf = calloc(1, var->ty->size);
+  write_gvar_data(init, var->ty, buf, 0);
+  var->initdata = buf;
 }
 
 // compoundStmt = (declaration | stmt*) "}"
