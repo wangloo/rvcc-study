@@ -2252,6 +2252,7 @@ static Type *struct_decl(Token **rest, Token *tok) {
   // 结构体内成员的偏移量
   int offset = 0;
   for (Member *mem = ty->mems; mem; mem = mem->next) {
+    offset = align_to(offset, mem->ty->align);
     mem->offset = offset;
     offset += mem->ty->size;
 

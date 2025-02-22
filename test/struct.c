@@ -1,4 +1,8 @@
 #include "test.h"
+
+// [103] bugfix补充
+struct t {char a; int b;}g_x;
+
 int main() {
   // [49] 支持struct
   ASSERT(1, ({ struct {int a; int b;} x; x.a=1; x.b=2; x.a; }));
@@ -25,6 +29,7 @@ int main() {
   // [50] 对齐结构体成员变量
   ASSERT(8, ({ struct {char a; int b;} x; sizeof(x); }));
   ASSERT(8, ({ struct {int a; char b;} x; sizeof(x); }));
+  ASSERT(3, ({ g_x.a = 3; g_x.b = 4; *(int *)&g_x;})); // [103] bugfix补充
   // [52] 支持结构体标签
   ASSERT(8, ({ struct t {int a; int b;} x; struct t y; sizeof(y); }));
   ASSERT(8, ({ struct t {int a; int b;}; struct t y; sizeof(y); }));
