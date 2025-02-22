@@ -268,6 +268,17 @@ static Node *newsub(Node *left, Node *right, Token *tok)
   if (is_integer(left->ty) && is_integer(right->ty))
     return newbinary(ND_SUB, left, right, tok);
 
+  // array - num ==> ptr - num
+  if (left->ty->kind == TY_ARRAY || is_integer(right->ty)) {
+      // Token *name = left->ty->name;
+      // left->ty = pointerto(left->ty->base);
+      // left->ty->name = name;
+    right = newbinary(ND_MUL, right, newlong(left->ty->base->size, tok), tok);
+    add_type(right);
+    Node *nd = newbinary(ND_SUB, left, right, tok);
+    nd->ty = left->ty;
+    return nd;
+  }
   // ptr - num
   if (left->ty->kind == TY_PTR && is_integer(right->ty)) {
     right = newbinary(ND_MUL, right, newlong(left->ty->base->size, tok), tok);
@@ -285,6 +296,7 @@ static Node *newsub(Node *left, Node *right, Token *tok)
     nd->ty = TyInt;
     return newbinary(ND_DIV, nd, newnum(left->ty->base->size, tok), tok);
   }
+  printf("left kind: %d, right kind: %d\n", left->ty->kind, right->ty->kind);
   errorTok(tok, "invalid operands");
   return NULL;
 }
@@ -457,6 +469,8 @@ static Node *expr_stmt(Token **rest, Token *tok);
 static Node *stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static int64_t eval(Node *nd);
+static int64_t eval2(Node *nd, char **label);
+static int64_t eval_rval(Node *nd, char **label);
 static int64_t const_expr(Token **rest, Token *tok);
 static Node *assign(Token **rest, Token *tok);
 static Node *conditional(Token **rest, Token *tok);
@@ -1175,23 +1189,46 @@ static void write_buf(char *buf, uint64_t val, int sz) {
 }
 
 // 对全局变量的初始化器写入数据
-static void write_gvar_data(Initializer *init, Type *ty, char *buf, int offset) {
+static Relocation *write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int offset) {
   // 处理数组
   if (ty->kind == TY_ARRAY) {
     int sz = ty->base->size;
     for (int i = 0; i < ty->arraylen; i++)
-      write_gvar_data(init->children[i], ty->base, buf, offset + sz * i);
-    return;
+      cur = write_gvar_data(cur, init->children[i], ty->base, buf, offset + sz * i);
+    return cur;
   }
   // 处理结构体
   if (ty->kind == TY_STRUCT) {
     for (Member *mem = ty->mems; mem; mem = mem->next)
-      write_gvar_data(init->children[mem->idx], mem->ty, buf, offset + mem->offset);
-    return;
+      cur = write_gvar_data(cur, init->children[mem->idx], mem->ty, buf, offset + mem->offset);
+    return cur;
   }
-  // 计算常量表达式
-  if (init->expr)
-    write_buf(buf + offset, eval(init->expr), ty->size);
+
+  // 处理联合体
+  if (ty->kind == TY_UNION) {
+    return write_gvar_data(cur, init->children[0], ty->mems->ty, buf, offset);
+  }
+
+  // 这里返回，则会使buf值为0
+  if (!init->expr)
+    return cur;
+
+  // 预设使用到的 其他全局变量的名称
+  char *label = NULL;
+  uint64_t val = eval2(init->expr, &label);
+  // 如果不存在label，说明可以直接计算常量表达式的值
+  if (!label) {
+    write_buf(buf + offset, val, ty->size);
+    return cur;
+  }
+  // 存在label，则表示试用其他全局变量
+  Relocation *rel = calloc(1, sizeof(Relocation));
+  rel->offset = offset;
+  rel->label = label;
+  rel->addend = val;
+  // 压入链表顶部
+  cur->next = rel;
+  return cur->next;
 }
 
 static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
@@ -1199,9 +1236,12 @@ static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
   Initializer *init = initializer(rest, tok, var->ty, &var->ty);
 
   // 写入计算后的值
+  // 新建一个重定向的链表
+  Relocation head = {0};
   char *buf = calloc(1, var->ty->size);
-  write_gvar_data(init, var->ty, buf, 0);
+  write_gvar_data(&head, init, var->ty, buf, 0);
   var->initdata = buf;
+  var->rel = head.next;
 }
 
 // compoundStmt = (declaration | stmt*) "}"
@@ -1511,14 +1551,19 @@ static Node *expr(Token **rest, Token *tok) {
 }
 
 static int64_t eval(Node *nd) {
+  return eval2(nd, NULL);
+}
+// 计算给定阶段的常量表达式
+// 常量表达式可以是数字或者是 ptr±n，ptr是指向全局变量的指针，n是偏移量。
+static int64_t eval2(Node *nd, char **label) {
   add_type(nd);
 
   switch (nd->kind)
   {
   case ND_ADD:
-    return eval(nd->left) + eval(nd->right);
+    return eval2(nd->left, label) + eval(nd->right);
   case ND_SUB:
-    return eval(nd->left) - eval(nd->right);
+    return eval2(nd->left, label) - eval(nd->right);
   case ND_MUL:
     return eval(nd->left) * eval(nd->right);
   case ND_DIV:
@@ -1546,9 +1591,9 @@ static int64_t eval(Node *nd) {
   case ND_LE:
     return eval(nd->left) <= eval(nd->right);
   case ND_COND:
-    return eval(nd->cond) ? eval(nd->then) : eval(nd->els);
+    return eval(nd->cond) ? eval2(nd->then, label) : eval2(nd->els, label);
   case ND_COMMA:
-    return eval(nd->right);
+    return eval2(nd->right, label);
   case ND_NOT:
     return !eval(nd->right);
   case ND_BITNOT:
@@ -1557,18 +1602,40 @@ static int64_t eval(Node *nd) {
     return eval(nd->left) && eval(nd->right);
   case ND_LOGOR:
     return eval(nd->left) || eval(nd->right);
-  case ND_CAST:
+  case ND_CAST: {
+    int64_t val = eval2(nd->left, label);
     if (is_integer(nd->ty)) {
       switch(nd->ty->size) {
       case 1:
-        return (uint8_t)eval(nd->left);
+        return (uint8_t)val;
       case 2:
-        return (uint16_t)eval(nd->left);
+        return (uint16_t)val;
       case 4:
-        return (uint32_t)eval(nd->left);
+        return (uint32_t)val;
       }
     }
-    return eval(nd->left);
+    return val;
+  }
+  case ND_ADDR:
+    return eval_rval(nd->right, label);
+  case ND_MEMBER:
+    // 未开辟Label的地址，则表明不是表达式常量
+    if (!label)
+      errorTok(nd->tok, "not a compile-time constand");
+    // 不能为数组
+    if (nd->ty->kind != TY_ARRAY)
+      errorTok(nd->tok, "invalid initializer");
+    // 返回左部的值（并解析Label），加上成员变量的偏移量
+    return eval_rval(nd->right, label) + nd->mem->offset;
+  case ND_VAR:
+    // 未开辟Label的地址，则表明不是表达式常量
+    if (!label)
+      errorTok(nd->tok, "not a compile-time constand");
+    // 不能为数组或者函数
+    if (nd->var->ty->kind != TY_ARRAY && nd->var->ty->kind != TY_FUNC)
+      errorTok(nd->tok, "invalid initializer..");
+    *label = nd->var->name;
+    return 0;
   case ND_NUM:
     return nd->val;
   default:
@@ -1578,6 +1645,28 @@ static int64_t eval(Node *nd) {
   errorTok(nd->tok, "not a compile-time constant");
   return -1;
 }
+
+// 计算重定位变量
+static int64_t eval_rval(Node *nd, char **label) {
+  switch(nd->kind) {
+  case ND_VAR:
+    // 局部变量不参与全局变量的初始化
+    if (nd->var->is_local)
+      errorTok(nd->tok, "not a compile-time constand");
+    *label = nd->var->name;
+    return 0;
+  case ND_DEREF:
+    return eval2(nd->right, label);
+  case ND_MEMBER:
+    return eval_rval(nd->right, label) + nd->mem->offset;
+  default:
+    break;
+  }
+
+  errorTok(nd->tok, "invalid initializer");
+  return -1;
+}
+
 static int64_t const_expr(Token **rest, Token *tok) {
   // 进行常量表达式的构造
   Node *nd = conditional(rest, tok);

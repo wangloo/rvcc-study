@@ -95,6 +95,7 @@ typedef enum {
 typedef struct Obj Obj;
 typedef struct Type Type;
 typedef struct Member Member;
+typedef struct Relocation Relocation;
 
 // AST中二叉树节点
 // AST: 语法树
@@ -157,7 +158,8 @@ typedef struct Obj {
   bool is_static;    // 是否为文件域内
 
   // 全局变量
-  char *initdata;
+  char *initdata;  // 用于初始化的数据
+  Relocation *rel; // 指向其他全局变量的指针
 
   // 函数
   struct Obj *params;  // 形参
@@ -166,6 +168,16 @@ typedef struct Obj {
   int stacksize;       // 栈大小
 
 } Obj;
+
+// 全局变量可被 常量表达式 或者 指向其他全局变量的指针 初始化
+// 此结构体用于 指向其他全局变量的指针 的情况
+typedef struct Relocation Relocation;
+struct Relocation {
+  Relocation *next;  // 下一个
+  int offset;   // 偏移量
+  char *label;  // 标签名
+  long addend;  // 加数
+};
 
 //
 // 类型系统

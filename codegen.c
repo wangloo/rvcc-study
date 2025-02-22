@@ -600,13 +600,23 @@ static void emit_data(Obj *prog) {
     // 判断是否有初始值
     if (var->initdata) {
       println("%s:", var->name);
-      // 打印出字符串的内容，包括转义字符
-      for (int i = 0; i < var->ty->size; ++i) {
-        char c = var->initdata[i];
-        if (isprint(c))
-          println("  .byte %d\t# 字符：%c", c, c);
-        else
-          println("  .byte %d", c);
+      Relocation *rel = var->rel;
+      int pos = 0;
+      while (pos < var->ty->size) {
+        if (rel && rel->offset == pos) {
+          // 使用其他变量进行初始化
+          println("  # %s全局变量", var->name);
+          println("  .quad %s%+ld", rel->label, rel->addend);
+          rel = rel->next;
+          pos += 8;
+        } else {
+          // 打印出字符串的内容，包括转义字符
+          char c = var->initdata[pos++];
+          if (isprint(c))
+            println("  .byte %d\t# 字符：%c", c, c);
+          else
+            println("  .byte %d", c);
+        }
       }
     } else {
       println("  .globl %s", var->name);
