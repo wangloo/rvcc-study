@@ -1030,6 +1030,15 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
 
   // 结构体的初始化
   if (init->ty->kind == TY_STRUCT) {
+    // 匹配使用其他结构体初始化，其他结构体需要先被解析过
+    if (!equal(tok , "{")) {
+      Node *expr = assign(rest, tok);
+      add_type(expr);
+      if (expr->ty->kind == TY_STRUCT) {
+        init->expr = expr;
+        return;
+      }
+    }
     struct_initializer(rest, tok, init);
     return;
   }
@@ -1086,7 +1095,8 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Tok
     return nd;
   }
 
-  if (ty->kind == TY_STRUCT) {
+  // 被其他结构体赋过值，则会存在Expr因而不解析
+  if (ty->kind == TY_STRUCT && !init->expr) {
     // 构造结构体的初始化器结构
     Node *nd = newnode(ND_NULL_EXPR, tok);
 
