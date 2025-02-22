@@ -358,7 +358,7 @@ static  Initializer *new_initializer(Type *ty, bool is_flexible) {
   }
 
   // 处理结构体
-  if (ty->kind == TY_STRUCT) {
+  if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
     // 计算结构体成员的数量
     int len = 0;
     for (Member *mem = ty->mems; mem; mem = mem->next)
@@ -389,10 +389,12 @@ static Type *struct_decl(Token **rest, Token *tok);
 //             | "typedef" | "static"
 //             | structDecl | unionDecl | typedefName)+
 //             | enumSpecifier)+
-// initializer = stringInitializer | arrayInitializer | structInitializer | assign
+// initializer = stringInitializer | arrayInitializer | structInitializer
+//               | unionInitializer | assign
 // stringInitializer = stringLiteral
 // arrayInitializer = "{" initializer ("," initializer)* "}"
 // structInitializer = "{" initializer ("," initializer)* "}"
+// unionInitializer = "{" initializer "}"
 // structDecl = structUnionDecl
 // unionDecl = structUnionDecl
 // structUnionDecl = ident? ("{" struct Members)?
@@ -1015,7 +1017,16 @@ static void struct_initializer(Token **rest, Token *tok, Initializer *init) {
   }
 }
 
-// initializer = stringInitializer | arrayInitializer | structInitializer | assign
+static void union_initializer(Token **rest, Token *tok, Initializer *init) {
+  tok = skip(tok, "{");
+
+  // 联合体只接受第一个成员用来初始化
+  initializer2(&tok, tok, init->children[0]);
+  *rest = skip(tok, "}");
+}
+
+// initializer = stringInitializer | arrayInitializer | structInitializer
+//               | unionInitializer | assign
 static void initializer2(Token **rest, Token *tok, Initializer *init) {
   // 字符串字面量的初始化
   if (init->ty->kind == TY_ARRAY && tok->kind == TK_STR) {
@@ -1040,6 +1051,12 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
       }
     }
     struct_initializer(rest, tok, init);
+    return;
+  }
+
+  // 联合体的初始化
+  if (init->ty->kind == TY_UNION) {
+    union_initializer(rest, tok, init);
     return;
   }
 
@@ -1107,6 +1124,12 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesig *desig, Tok
       nd = newbinary(ND_COMMA, nd, right, tok);
     }
     return nd;
+  }
+
+  if (ty->kind == TY_UNION) {
+    InitDesig design2 = {desig, 0, ty->mems};
+    // 只处理第一个成员变量
+    return create_lvar_init(init->children[0], ty->mems->ty, &design2, tok);
   }
 
   // 如果需要作为右值的表达式为空，则设为空表达式
