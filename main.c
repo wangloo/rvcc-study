@@ -1183,6 +1183,12 @@ static void write_gvar_data(Initializer *init, Type *ty, char *buf, int offset) 
       write_gvar_data(init->children[i], ty->base, buf, offset + sz * i);
     return;
   }
+  // 处理结构体
+  if (ty->kind == TY_STRUCT) {
+    for (Member *mem = ty->mems; mem; mem = mem->next)
+      write_gvar_data(init->children[mem->idx], mem->ty, buf, offset + mem->offset);
+    return;
+  }
   // 计算常量表达式
   if (init->expr)
     write_buf(buf + offset, eval(init->expr), ty->size);
